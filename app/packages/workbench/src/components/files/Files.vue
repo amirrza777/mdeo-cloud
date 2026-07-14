@@ -43,9 +43,21 @@
                         <DownloadIcon class="size-4 mr-2" />
                         <span>Download</span>
                     </ContextMenuItem>
+                    <ContextMenuItem @click="handleUploadClick">
+                        <UploadIcon />
+                        <span>Upload CSV...</span>
+                    </ContextMenuItem>
                 </ContextMenuContent>
             </ContextMenu>
         </ScrollArea>
+        <input
+            ref="fileInputRef"
+            type="file"
+            accept=".csv"
+            multiple
+            class="hidden"
+            @change="handleFileInputChange"
+        />
     </div>
 </template>
 
@@ -61,7 +73,7 @@ import {
     ContextMenuSeparator
 } from "@/components/ui/context-menu";
 import type { FileSystemNode, Folder } from "@/data/filesystem/file";
-import type { DragAndDropCallbacks } from "@/components/tree/util";
+import type { DragAndDropCallbacks, TreeItem } from "@/components/tree/util";
 import FileSystemItemList, { type NewItemState } from "./FileSystemItemList.vue";
 import type { ResolvedWorkbenchLanguagePlugin } from "@/data/plugin/plugin";
 import ScrollArea from "../ui/scroll-area/ScrollArea.vue";
@@ -70,11 +82,12 @@ import { workbenchStateKey } from "../workbench/util";
 import { Uri } from "vscode";
 import { FileType } from "@codingame/monaco-vscode-files-service-override";
 import { findFileInTree } from "@/data/filesystem/util";
-import { FolderIcon, DownloadIcon } from "lucide-vue-next";
+import { FolderIcon, DownloadIcon, UploadIcon } from "lucide-vue-next";
 import FileTypeIcon from "../FileTypeIcon.vue";
 import type { EditorTab } from "@/data/tab/editorTab";
 import { FileCategory, parseUri } from "@mdeo/language-common";
 import { downloadFolderAsZip } from "@/lib/zip";
+import { uploadCsvFiles } from "@/data/filesystem/uploadFiles";
 
 const workbenchState = inject(workbenchStateKey)!;
 const { fileTree: rootFolder, activeTab, monacoApi, languagePlugins, tabs } = workbenchState;
@@ -85,6 +98,7 @@ const expandedItems = ref<Set<FileSystemNode>>(new Set());
 const newItem = ref<NewItemState>();
 
 const treeRef = useTemplateRef("treeRef");
+const fileInputRef = useTemplateRef("fileInputRef");
 
 watch(
     activeTab,
@@ -201,6 +215,25 @@ async function handleDownloadProject() {
     await downloadFolderAsZip(monacoApi, rootFolder, rootFolder.name);
 }
 
+function handleUploadClick() {
+    fileInputRef.value?.click();
+}
+
+async function handleFileInputChange(event: Event) {
+    const input = event.target as HTMLInputElement;
+    if (input.files != undefined && input.files.length > 0) {
+        await uploadCsvFiles(input.files, rootFolder.uri, monacoApi.fileService, tabs, activeTab);
+    }
+    input.value = "";
+}
+
+async function handleFilesDropped(files: FileList, targetItem: TreeItem | undefined) {
+    const targetNode = targetItem as FileSystemNode | undefined;
+    const targetFolderUri =
+        targetNode != undefined && targetNode.type === FileType.Directory ? targetNode.uri : rootFolder.uri;
+    await uploadCsvFiles(files, targetFolderUri, monacoApi.fileService, tabs, activeTab);
+}
+
 const dragAndDropCallbacks: DragAndDropCallbacks = {
     canDrop: (draggedItemId, targetItem) => {
         const draggedNode = findFileInRoot(Uri.file(draggedItemId));
@@ -253,7 +286,9 @@ const dragAndDropCallbacks: DragAndDropCallbacks = {
         }
 
         handleMove(draggedNode.uri, rootFolder.uri);
-    }
+    },
+
+    onFilesDropped: handleFilesDropped
 };
 
 function findFileInRoot(uri: Uri): FileSystemNode | undefined {

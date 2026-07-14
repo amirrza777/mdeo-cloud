@@ -71,6 +71,11 @@
                     <span>Create New Folder</span>
                 </ContextMenuItem>
                 <ContextMenuSeparator />
+                <ContextMenuItem @click="handleUploadClick">
+                    <UploadIcon />
+                    <span>Upload CSV...</span>
+                </ContextMenuItem>
+                <ContextMenuSeparator />
             </template>
             <ContextMenuItem @click="handleDownload">
                 <DownloadIcon class="size-4 mr-2" />
@@ -87,6 +92,16 @@
             </ContextMenuItem>
         </ContextMenuContent>
     </ContextMenu>
+
+    <input
+        v-if="entry.type === FileType.Directory"
+        ref="fileInputRef"
+        type="file"
+        accept=".csv"
+        multiple
+        class="hidden"
+        @change="handleFileInputChange"
+    />
 
     <AlertDialog v-model:open="showDeleteDialog">
         <AlertDialogContent>
@@ -106,8 +121,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, inject, computed } from "vue";
-import { FolderIcon, EditIcon, Trash2Icon, DownloadIcon, Icon } from "lucide-vue-next";
+import { ref, inject, computed, useTemplateRef } from "vue";
+import { FolderIcon, EditIcon, Trash2Icon, DownloadIcon, UploadIcon, Icon } from "lucide-vue-next";
 import TreeItem from "@/components/tree/TreeItem.vue";
 import TreeItemInput from "../tree/TreeItemInput.vue";
 import FileSystemItemList from "./FileSystemItemList.vue";
@@ -141,6 +156,7 @@ import { getFileExtension } from "@/data/filesystem/util";
 import { downloadFolderAsZip, downloadBlob } from "@/lib/zip";
 import plugin from "vue-sonner";
 import { fetchFileActions as fetchAvailableFileActions, triggerFileAction } from "@/components/action/fileActions";
+import { uploadCsvFiles } from "@/data/filesystem/uploadFiles";
 
 const props = defineProps<{
     entry: FileSystemNode;
@@ -151,6 +167,7 @@ const {
     monacoApi,
     languagePlugins,
     activeTab,
+    tabs,
     languagePluginByExtension,
     languageClient,
     pendingAction,
@@ -173,6 +190,7 @@ const isRenaming = ref(false);
 const showDeleteDialog = ref(false);
 const newItem = ref<NewItemState>();
 const fileActions = ref<FileAction[]>([]);
+const fileInputRef = useTemplateRef("fileInputRef");
 
 const contextMenuActions = computed(() =>
     fileActions.value.filter((action) => action.displayLocations.includes(ActionDisplayLocation.CONTEXT_MENU))
@@ -270,6 +288,21 @@ function handleCreateFolder() {
     } else {
         emit("delegateCreateFolder");
     }
+}
+
+function handleUploadClick() {
+    fileInputRef.value?.click();
+}
+
+async function handleFileInputChange(event: Event) {
+    if (props.entry.type !== FileType.Directory) {
+        return;
+    }
+    const input = event.target as HTMLInputElement;
+    if (input.files != undefined && input.files.length > 0) {
+        await uploadCsvFiles(input.files, props.entry.uri, monacoApi.fileService, tabs, activeTab);
+    }
+    input.value = "";
 }
 
 function handleKeydown(event: KeyboardEvent) {
