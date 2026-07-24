@@ -1,4 +1,4 @@
-import { createRule, many, optional, or, ref, createExternalTerminalRule } from "@mdeo/language-common";
+import { createRule, many, optional, or, ref, group, createExternalTerminalRule } from "@mdeo/language-common";
 import { CsvClassImport, CsvColumnMapping, CsvImportBlock, ExternalClass } from "./csvImportTypes.js";
 
 /**
@@ -16,11 +16,13 @@ export const CsvColumnMappingRule = createRule("CsvColumnMappingRule")
     .as(({ set }) => [set("csvColumn", STRING), "=", set("property", ID)]);
 
 /**
- * The optional explicit mapping list uses square brackets rather than curly
- * braces, since curly braces already close the enclosing `import CSV { }`
- * block and this grammar's newline-aware brace handling only special-cases
- * "{"/"}"/"("/")" - reusing braces here caused the parser to misread the
- * mapping list's own opening brace as the start of a new class import.
+ * The optional explicit mapping list is introduced by the "with" keyword,
+ * the same way the model-transformation grammar disambiguates two adjacent
+ * brace blocks in one rule (e.g. `match { pattern } then { block }`): the
+ * keyword between them is what tells the parser which block it's entering,
+ * not the bracket type. Reusing bare curly braces here, with nothing between
+ * `file` and the mapping list's own "{", caused the parser to misread the
+ * mapping list's opening brace as the start of a new class import.
  */
 export const CsvClassImportRule = createRule("CsvClassImportRule")
     .returns(CsvClassImport)
@@ -28,7 +30,9 @@ export const CsvClassImportRule = createRule("CsvClassImportRule")
         set("class", ref(ExternalClass, ID)),
         "from",
         set("file", STRING),
-        optional("[", many(or(add("mappings", CsvColumnMappingRule), NEWLINE)), "]")
+        optional(
+            group("with", "{", many(or(add("mappings", CsvColumnMappingRule), NEWLINE)), "}")
+        )
     ]);
 
 /**
