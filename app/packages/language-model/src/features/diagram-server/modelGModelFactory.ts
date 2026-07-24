@@ -7,7 +7,8 @@ import {
     EdgeLayoutMetadataUtil,
     NodeLayoutMetadataUtil,
     parseIdentifier,
-    resolveRelativePath
+    resolveRelativePath,
+    parseCsv
 } from "@mdeo/language-shared";
 import type { ModelIdRegistry, GraphMetadata } from "@mdeo/language-shared";
 import type { NodeLayoutMetadata, EdgeLayoutMetadata } from "@mdeo/protocol-common";
@@ -496,7 +497,7 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
             try {
                 const uri = resolveRelativePath(doc, entry.file ?? "");
                 const csvContent = await this.modelState.languageServices.shared.workspace.FileSystemProvider.readFile(uri);
-                const rows = csvContent.split(/\r?\n/).filter((line: string) => line.trim() !== "").map((line: string) => line.split(","));
+                const rows = parseCsv(csvContent);
                 if (rows.length < 2) continue;
                 const classHierarchy = resolveClassChain(classRef, this.reflection).map((c) => c.name);
                 rows.slice(1).forEach((_row: string[], rowIndex: number) => {

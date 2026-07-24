@@ -1,4 +1,5 @@
 import type { ModelData, ModelDataInstance, ModelDataPropertyValue } from "@mdeo/language-model";
+import { parseCsv } from "@mdeo/language-shared";
 
 export interface CsvImportEntry {
     className: string;
@@ -171,58 +172,3 @@ function normalizeRow(row: string[], expectedLength: number, rowNumber: number, 
     return row.slice(0, expectedLength);
 }
 
-function parseCsv(text: string): string[][] {
-    const rows: string[][] = [];
-    let currentRow: string[] = [];
-    let currentField = "";
-    let inQuotes = false;
-    let i = 0;
-
-    const endField = () => {
-        currentRow.push(currentField);
-        currentField = "";
-    };
-
-    const endRow = () => {
-        endField();
-        if (!(currentRow.length === 1 && currentRow[0].trim() === "")) {
-            rows.push(currentRow);
-        }
-        currentRow = [];
-    };
-
-    while (i < text.length) {
-        const c = text[i];
-        if (inQuotes) {
-            if (c === '"') {
-                if (i + 1 < text.length && text[i + 1] === '"') {
-                    currentField += '"';
-                    i++;
-                } else {
-                    inQuotes = false;
-                }
-            } else {
-                currentField += c;
-            }
-        } else {
-            if (c === '"') {
-                inQuotes = true;
-            } else if (c === ',') {
-                endField();
-            } else if (c === '\r') {
-                // skip
-            } else if (c === '\n') {
-                endRow();
-            } else {
-                currentField += c;
-            }
-        }
-        i++;
-    }
-
-    if (currentField !== "" || currentRow.length > 0) {
-        endRow();
-    }
-
-    return rows;
-}

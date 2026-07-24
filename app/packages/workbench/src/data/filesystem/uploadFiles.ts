@@ -33,6 +33,7 @@ export async function uploadCsvFiles(
     }
 
     let lastCreatedUri: Uri | undefined;
+    const uploaded: string[] = [];
 
     for (const file of csvFiles) {
         const uri = Uri.joinPath(targetFolderUri, file.name);
@@ -40,6 +41,7 @@ export async function uploadCsvFiles(
             const text = await file.text();
             await fileService.createFile(uri, VSBuffer.fromString(text));
             lastCreatedUri = uri;
+            uploaded.push(file.name);
         } catch (error) {
             showError(`Failed to upload ${file.name}`, {
                 description: error instanceof Error ? error.message : undefined
@@ -51,7 +53,7 @@ export async function uploadCsvFiles(
         return;
     }
 
-    showSuccess(csvFiles.length === 1 ? `Uploaded ${csvFiles[0]?.name}` : `Uploaded ${csvFiles.length} files`);
+    showSuccess(uploaded.length === 1 ? `Uploaded ${uploaded[0]}` : `Uploaded ${uploaded.length} files`);
 
     const existingTab = tabs.value.find((tab) => tab.fileUri.toString() === lastCreatedUri!.toString());
     if (existingTab) {
