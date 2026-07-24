@@ -93,10 +93,13 @@ export const modelDataHandler: FileDataHandler<ModelData | null, ModelServices> 
 
     const result = importCsvEntries(csvEntries, metamodelClasses);
 
+    const converter = new ModelDataConverter(reflection);
+    const handAuthored = converter.convertModel(model);
+
     const modelData: ModelData = {
         metamodelPath,
-        instances: result.instances,
-        links: result.links
+        instances: [...handAuthored.instances, ...result.instances],
+        links: [...handAuthored.links, ...result.links]
     };
 
     return {
