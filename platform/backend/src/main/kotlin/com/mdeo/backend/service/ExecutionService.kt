@@ -819,7 +819,10 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer $token")
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                .timeout(Duration.ofMinutes(1))
+                // Starting an execution can require the plugin to have file data computed first,
+                // which for a large model takes minutes, so this must not give up before a single
+                // computation would have been abandoned anyway.
+                .timeout(Duration.ofSeconds(config.fileData.computationTimeoutSeconds))
                 .build()
 
             val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())

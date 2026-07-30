@@ -12,6 +12,15 @@ import type { ExecutionContext, ExecutionMetadata, ExecutionRequestContext } fro
 import { JwtAuthMiddleware } from "../auth/jwtAuth.js";
 
 /**
+ * Default maximum size in bytes of a request body accepted by a language service.
+ *
+ * Request bodies carry whole source files - the backend posts a file's content when it asks for
+ * computed file data, and execution requests carry the file that is being executed - so Fastify's
+ * 1 MiB default rejects any file above roughly a megabyte with a 413 before the handler ever runs.
+ */
+export const DEFAULT_MAX_REQUEST_BODY_BYTES = 64 * 1024 * 1024;
+
+/**
  * Internal structure for managing a language's pool and configuration.
  */
 interface LanguageHandler<T> {
@@ -65,6 +74,7 @@ function extractExecutionMetadataFromRequest(request: FastifyRequest): Execution
  */
 export async function createLanguageService<T>(config: ServiceConfig<T>): Promise<FastifyInstance> {
     const fastify = Fastify({
+        bodyLimit: config.maxRequestBodyBytes ?? DEFAULT_MAX_REQUEST_BODY_BYTES,
         logger: {
             transport: {
                 target: "pino-pretty"

@@ -4,6 +4,7 @@ import com.mdeo.common.model.ExecutionState
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
+import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.http.*
@@ -14,6 +15,17 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.modules.SerializersModule
 import org.slf4j.LoggerFactory
+
+/**
+ * Request and socket timeout in milliseconds for calls an execution node makes to the backend.
+ *
+ * A request for file data can make the backend compute that data first, which for a large model
+ * takes minutes, so the CIO default of 15 seconds gives up long before an answer is due. This is
+ * deliberately longer than the backend's own computation timeout, so that a computation which
+ * really does not finish is reported as the backend's error instead of disappearing behind a
+ * timeout on this side.
+ */
+const val BACKEND_REQUEST_TIMEOUT_MS = 600_000L
 
 /**
  * Base HTTP client for interacting with the backend API.
@@ -46,9 +58,26 @@ open class BackendApiClient(
         const val RETRY_BASE_DELAY_MS = 1_000L
     }
 
-    protected val client: HttpClient = HttpClient(CIO) {
-        install(ContentNegotiation) {
-            json(createJsonConfig(serializersModule))
+    protected val client: HttpClient = createBackendClient(serializersModule)
+
+    /**
+     * Creates an HTTP client for backend calls, with the shared JSON and timeout configuration.
+     *
+     * Subclasses that need additional clients (for example with type-specific serializers) should
+     * create them with this, so that they get the same timeouts.
+     *
+     * @param serializersModule Optional custom serializers module for type-specific deserialization
+     * @return The configured HTTP client
+     */
+    protected fun createBackendClient(serializersModule: SerializersModule? = null): HttpClient {
+        return HttpClient(CIO) {
+            install(ContentNegotiation) {
+                json(createJsonConfig(serializersModule))
+            }
+            install(HttpTimeout) {
+                requestTimeoutMillis = BACKEND_REQUEST_TIMEOUT_MS
+                socketTimeoutMillis = BACKEND_REQUEST_TIMEOUT_MS
+            }
         }
     }
 

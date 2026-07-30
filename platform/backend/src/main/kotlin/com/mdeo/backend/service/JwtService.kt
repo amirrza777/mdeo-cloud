@@ -154,13 +154,18 @@ class JwtService(services: InjectedServices) : BaseService(), InjectedServices b
 
     /**
      * Generates a token authorising a single call this backend makes out to a plugin, such as
-     * fetching an execution's files or cancelling it.
+     * fetching an execution's files, its summary, or cancelling and deleting it.
      *
-     * The plugin only ever presents this token back to itself, to check that the caller may act on
-     * the execution - it never calls this backend with it. It therefore carries no backend scopes at
-     * all, and grants nothing here. Keep it that way: these calls legitimately target executions
-     * that have already finished, so the token cannot be bound to an active execution either, and
-     * scopes it does not need would be the one thing left protecting it.
+     * The plugin serves these calls by reading back what belongs to the execution, and a plugin that
+     * only routes them onwards - the config plugin forwards to whichever contribution plugin owns
+     * the executable section - has to reach this backend to do so. The token therefore carries the
+     * same read scopes as a project token, plus the single `plugin:execution:*` scope the call
+     * itself requires.
+     *
+     * These calls legitimately target executions that have already finished, so the token cannot be
+     * bound to an active execution. It is instead kept to the general (request-scoped) lifetime and
+     * to read access, unlike the long-lived token an execution node holds; see
+     * [generateExecutionRunToken].
      *
      * @param projectId The UUID of the project
      * @param executionId The UUID of the execution the plugin call targets
@@ -177,7 +182,12 @@ class JwtService(services: InjectedServices) : BaseService(), InjectedServices b
             .withExpiresAt(Date.from(expiration))
             .withClaim(CLAIM_PROJECT_ID, projectId.toString())
             .withClaim(CLAIM_EXECUTION_ID, executionId.toString())
-            .withArrayClaim(CLAIM_SCOPE, arrayOf(pluginScope))
+            .withArrayClaim(CLAIM_SCOPE, arrayOf(
+                SCOPE_FILES_READ,
+                SCOPE_FILE_DATA_READ,
+                SCOPE_EXECUTION_READ,
+                pluginScope
+            ))
             .sign(algorithm)
     }
 

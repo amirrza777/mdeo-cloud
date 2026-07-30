@@ -217,3 +217,35 @@ sealed class SubprocessChannelMessage {
         override fun hashCode() = payload.contentHashCode()
     }
 }
+
+/**
+ * Interval in milliseconds at which a worker emits a
+ * [com.mdeo.optimizer.worker.WorkerHeartbeat] while it is processing a request.
+ */
+const val HEARTBEAT_INTERVAL_MS = 5_000L
+
+/**
+ * How long the orchestrator keeps waiting for a request after the last sign of life from the
+ * worker. Several missed beats, so that a busy or briefly stalled worker is not mistaken for a
+ * lost one, while a request nobody is working on is abandoned in well under a minute regardless
+ * of how long the work itself was allowed to take.
+ */
+const val UNRESPONSIVE_AFTER_MS = 6 * HEARTBEAT_INTERVAL_MS
+
+/**
+ * Watchdog budget in milliseconds for a single mutation task: one transformation step plus one
+ * evaluation of every guidance function. Shared by the subprocess, which enforces the budget, and
+ * by the parent, which sizes its transport timeouts so that the watchdog is what fires first.
+ *
+ * A budget of `0` means no watchdog, which is what an unconfigured timeout resolves to.
+ *
+ * @param numGuidanceFunctions Number of objectives plus constraints evaluated per solution.
+ * @param scriptTimeoutMs Budget for evaluating a single guidance function.
+ * @param transformationTimeoutMs Budget for applying a single transformation.
+ * @return The combined budget in milliseconds.
+ */
+fun mutationBudgetMs(
+    numGuidanceFunctions: Int,
+    scriptTimeoutMs: Long,
+    transformationTimeoutMs: Long
+): Long = numGuidanceFunctions.toLong() * scriptTimeoutMs + transformationTimeoutMs

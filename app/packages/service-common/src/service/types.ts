@@ -81,6 +81,12 @@ export interface ServiceConfig<T = object> {
     maxLangiumInstances?: number;
 
     /**
+     * Maximum size in bytes of an accepted request body. Must be large enough to hold the biggest
+     * source file the service is asked to process, since file content is sent in the request body.
+     */
+    maxRequestBodyBytes?: number;
+
+    /**
      * Base URL of the backend API for ServerApi
      */
     backendApiUrl: string;

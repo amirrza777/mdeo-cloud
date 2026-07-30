@@ -181,9 +181,11 @@ class WorkerSubprocessMain : SubprocessMain() {
                                 continue
                             }
                             val msg = cbor.decodeFromByteArray<WorkerWsMessage>(frame.readBytes())
-                            val responses = handler(msg)
-                            for (response in responses) {
-                                send(Frame.Binary(true, cbor.encodeToByteArray<WorkerWsMessage>(response)))
+                            beatWhile(msg.requestId) {
+                                val responses = handler(msg)
+                                for (response in responses) {
+                                    send(Frame.Binary(true, cbor.encodeToByteArray<WorkerWsMessage>(response)))
+                                }
                             }
                         }
                     }
@@ -246,13 +248,15 @@ class WorkerSubprocessMain : SubprocessMain() {
             while (!closed) {
                 val payload = queue.poll(100, TimeUnit.MILLISECONDS) ?: continue
                 val msg = cbor.decodeFromByteArray<WorkerWsMessage>(payload)
-                val responses = handler(msg)
-                val responsePayloads = responses.map { cbor.encodeToByteArray<WorkerWsMessage>(it) }
-                sendChannelMessage(
-                    cbor.encodeToByteArray<SubprocessChannelMessage>(
-                        SubprocessChannelMessage.OrchestratorResponses(responsePayloads)
+                beatWhile(msg.requestId) {
+                    val responses = handler(msg)
+                    val responsePayloads = responses.map { cbor.encodeToByteArray<WorkerWsMessage>(it) }
+                    sendChannelMessage(
+                        cbor.encodeToByteArray<SubprocessChannelMessage>(
+                            SubprocessChannelMessage.OrchestratorResponses(responsePayloads)
+                        )
                     )
-                )
+                }
             }
         }
 
@@ -695,6 +699,40 @@ class WorkerSubprocessMain : SubprocessMain() {
     }
 
     /**
+     * Runs [work], reporting a [WorkerHeartbeat] for [requestId] every [HEARTBEAT_INTERVAL_MS]
+     * until it returns.
+     *
+     * This is the only thing telling the orchestrator that a request is still being worked on.
+     * It therefore beats from its own thread rather than from the one doing the work: a request
+     * that takes an hour and one that has wedged look identical from the outside, and the
+     * difference is exactly what these beats carry. For the same reason it wraps handling *and*
+     * replying — a reply that takes a while to encode and write is still progress.
+     *
+     * @param requestId The request being processed.
+     * @param work The processing to run.
+     * @return Whatever [work] returns.
+     */
+    private inline fun <T> beatWhile(requestId: String, work: () -> T): T {
+        val beating = Thread {
+            try {
+                while (true) {
+                    Thread.sleep(HEARTBEAT_INTERVAL_MS)
+                    activeOrchestratorChannel?.sendNotice(WorkerHeartbeat(requestId))
+                }
+            } catch (_: InterruptedException) {
+                // Work finished; stop beating.
+            }
+        }
+        beating.isDaemon = true
+        beating.start()
+        return try {
+            work()
+        } finally {
+            beating.interrupt()
+        }
+    }
+
+    /**
      * Blocks until the solution for [solutionId] arrives in the evaluator, or [timeoutMs] elapses.
      *
      * Registers a shared [CompletableFuture] BEFORE checking
@@ -883,7 +921,7 @@ class WorkerSubprocessMain : SubprocessMain() {
             }
         }
         val evalId = evalIdCounter.incrementAndGet()
-        val mutationTimeoutMs = numGuidanceFunctions.toLong() * scriptTimeoutMs + transformationTimeoutMs
+        val mutationTimeoutMs = mutationBudgetMs(numGuidanceFunctions, scriptTimeoutMs, transformationTimeoutMs)
         if (mutationTimeoutMs > 0) {
             registerTimeout(evalId, mutationTimeoutMs)
         }
