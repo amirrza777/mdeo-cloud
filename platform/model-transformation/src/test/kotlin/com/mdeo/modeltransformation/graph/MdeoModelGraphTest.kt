@@ -131,6 +131,66 @@ class MdeoModelGraphTest {
     // Basic Graph Operations
     // ========================================================================
 
+    // ------------------------------------------------------------------
+    // Model statistics (match-planner input)
+    // ------------------------------------------------------------------
+
+    /**
+     * Both backends must agree with a from-scratch count of the same graph, since the match
+     * planner treats the two implementations as interchangeable sources of cardinalities.
+     */
+    @Test
+    fun statistics_matchAFullRescan_onBothBackends() {
+        for (graph in listOf<ModelGraph>(mdeoGraph, tinkerGraph)) {
+            val stats = graph.statistics
+            assertEquals(3, stats.vertexCount)
+            assertEquals(2, stats.edgeCount)
+            assertEquals(1, stats.verticesWithLabel("House"))
+            assertEquals(2, stats.verticesWithLabel("Room"))
+            assertEquals(2, stats.edgesWithLabel(EdgeLabelUtils.computeEdgeLabel("rooms", "house")))
+            assertEquals(0, stats.verticesWithLabel("Garage"))
+        }
+    }
+
+    /**
+     * [MdeoGraph] maintains its label counters incrementally rather than rescanning, so every
+     * mutation entry point has to keep them exact.
+     */
+    @Test
+    fun statistics_trackVertexAndEdgeMutations() {
+        val edgeLabel = EdgeLabelUtils.computeEdgeLabel("rooms", "house")
+        val g = mdeoGraph.traversal()
+
+        g.addV("Room").next()
+        assertEquals(3, mdeoGraph.statistics.verticesWithLabel("Room"))
+        assertEquals(4, mdeoGraph.statistics.vertexCount)
+
+        g.V().hasLabel("Room").has(graphKey("Room", "name"), "Kitchen").drop().iterate()
+        assertEquals(2, mdeoGraph.statistics.verticesWithLabel("Room"))
+        // Dropping a vertex drops its incident edge too.
+        assertEquals(1, mdeoGraph.statistics.edgesWithLabel(edgeLabel))
+
+        g.E().drop().iterate()
+        assertEquals(0, mdeoGraph.statistics.edgesWithLabel(edgeLabel))
+        assertEquals(0, mdeoGraph.statistics.edgeCount)
+    }
+
+    /** A deep copy inherits the counters, and the two graphs then diverge independently. */
+    @Test
+    fun statistics_areIndependentAfterDeepCopy() {
+        val copy = mdeoGraph.deepCopy()
+        try {
+            assertEquals(2, copy.statistics.verticesWithLabel("Room"))
+
+            copy.traversal().addV("Room").next()
+
+            assertEquals(3, copy.statistics.verticesWithLabel("Room"))
+            assertEquals(2, mdeoGraph.statistics.verticesWithLabel("Room"))
+        } finally {
+            copy.close()
+        }
+    }
+
     @Test
     fun createFromModelData_producesCorrectVerticesAndEdges() {
         val g = mdeoGraph.traversal()

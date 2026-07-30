@@ -43,3 +43,9 @@ tasks.test {
         jvmArgs("-agentpath:$profilerLib=start,event=$agentEvent,interval=1000000,file=$outputFile")
     }
 }
+
+// Prints the test runtime classpath so ad-hoc benchmark drivers can be launched with `java -cp`.
+tasks.register("printTestClasspath") {
+    val cp = sourceSets["test"].runtimeClasspath
+    doLast { println(cp.asPath) }
+}

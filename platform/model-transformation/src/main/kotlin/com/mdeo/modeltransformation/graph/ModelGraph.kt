@@ -42,9 +42,19 @@ interface ModelGraph : AutoCloseable {
     var metadata: ModelMetadata?
 
     /**
-     * Registry mapping vertex IDs to instance names. 
+     * Registry mapping vertex IDs to instance names.
      */
     val nameRegistry: InstanceNameRegistry
+
+    /**
+     * Cardinality statistics of the current model, used by the match planner to order plan
+     * steps by estimated selectivity.
+     *
+     * Implementations are expected to cache the snapshot and refresh it only when the model
+     * changes structurally; see [GraphStatisticsCache]. Because the statistics only affect
+     * *step order*, a slightly stale snapshot is never a correctness problem.
+     */
+    val statistics: ModelStatistics
 
     /**
      * Returns a Gremlin [GraphTraversalSource] for querying and modifying this graph.

@@ -30,6 +30,13 @@ class MatchExecutor {
         const val DEFAULT_LIMIT = 1L
         /** Signals unlimited results (for foreach operations). */
         const val UNLIMITED = -1L
+
+        /**
+         * When this system property is set, every match plan is printed to stdout as a
+         * compact step summary. Used to inspect the join order chosen for a pattern when
+         * diagnosing slow transformations; it has no effect on execution.
+         */
+        const val DEBUG_PLAN_PROPERTY = "mdeo.debug.matchplan"
     }
 
     private val labelIdGenerator = SequentialLabelIdGenerator()
@@ -124,7 +131,8 @@ class MatchExecutor {
             isCollectionExpression = { expr ->
                 expressionSupport.isCollectionType(expressionSupport.resolveExpressionType(expr))
             },
-            metamodelData = engine.metamodelData
+            metamodelData = engine.metamodelData,
+            statistics = engine.modelGraph.statistics
         ).build(elements, referencedInstances)
 
         // Snapshot the declaring-scope bindings of reassigned variables. Building the
@@ -137,6 +145,8 @@ class MatchExecutor {
                 Triple(name, scope, scope.getLocalBinding(name))
             }
         }
+
+        if (System.getProperty(DEBUG_PLAN_PROPERTY) != null) { printPlan(matchPlan) }
 
         val traversal = buildUnifiedTraversal(
             elements, matchPlan,
@@ -160,6 +170,41 @@ class MatchExecutor {
             }
         }
         return results
+    }
+
+    /**
+     * Prints a one-line-per-step summary of [plan] to stdout.
+     *
+     * Only the structural shape is printed (scans, walks, conditions and filter kinds); the
+     * compiled expressions behind property and where constraints are omitted so that the
+     * join order stays readable.
+     *
+     * @param plan The plan to describe.
+     */
+    private fun printPlan(plan: MatchPlan) {
+        println("[match-plan] ${plan.baseSteps.size} steps")
+        for ((index, step) in plan.baseSteps.withIndex()) {
+            println("  ${index.toString().padStart(2)} ${describeStep(step)}")
+        }
+    }
+
+    /** Returns a compact, human-readable description of a single [step]. */
+    private fun describeStep(step: BaseStep): String = when (step) {
+        is BaseStep.VertexScan ->
+            "scan   ${step.instanceName}: ${step.className ?: "?"}${if (step.vertexId != null) " (bound)" else ""}"
+        is BaseStep.EdgeWalk ->
+            "walk   ${step.fromInstanceName} -> ${step.toInstanceName}: ${step.toClassName ?: "?"}" +
+                (if (step.isReversed) " (reversed)" else "")
+        is BaseStep.InlinePropertyConstraint ->
+            "prop   ${step.instanceName}.${step.property.propertyName}${if (step.isConstant) " (const)" else ""}"
+        is BaseStep.DeferredPropertyConstraint -> "prop*  ${step.instanceName}.${step.property.propertyName}"
+        is BaseStep.ApplicationCondition ->
+            "${if (step.isNegative) "forbid" else "require"} anchor=${step.anchorName ?: "-"} " +
+                "inner=[${step.innerSteps.joinToString("; ") { describeStep(it) }}]"
+        is BaseStep.EqualityFilter -> "eq     ${step.instanceName}"
+        is BaseStep.VariableBinding -> "var    ${step.variable.variable.name}"
+        is BaseStep.WhereFilter -> "where"
+        is BaseStep.InjectiveConstraint -> "neq    ${step.instanceNameA} != ${step.instanceNameB}"
     }
 
     /**
