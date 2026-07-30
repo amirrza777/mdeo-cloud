@@ -3,6 +3,7 @@ package com.mdeo.backend.plugins
 import com.auth0.jwt.interfaces.Payload
 import com.mdeo.backend.config.SessionConfig
 import com.mdeo.backend.service.JwtService
+import com.mdeo.backend.service.TokenBindingService
 import com.mdeo.backend.service.UserService
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -36,11 +37,20 @@ data class JwtPrincipal(
  * Old cookies that pre-date the [UserSession.createdAt] field (`createdAt == 0`) are
  * treated as expired so that existing sessions are invalidated cleanly after a deploy.
  *
+ * JWT authentication additionally rejects tokens whose binding is no longer satisfied, i.e. tokens
+ * issued for a piece of work that has since finished. See [TokenBindingService].
+ *
  * @param jwtService Service for JWT operations.
  * @param userService Service for user operations.
+ * @param tokenBindingService Service checking that a bound token's work is still in progress.
  * @param sessionConfig Session lifetime / cookie settings.
  */
-fun Application.configureAuthentication(jwtService: JwtService, userService: UserService, sessionConfig: SessionConfig) {
+fun Application.configureAuthentication(
+    jwtService: JwtService,
+    userService: UserService,
+    tokenBindingService: TokenBindingService,
+    sessionConfig: SessionConfig
+) {
     install(Authentication) {
         session<UserSession>(AUTH_SESSION) {
             validate { session ->
@@ -63,8 +73,8 @@ fun Application.configureAuthentication(jwtService: JwtService, userService: Use
             verifier(jwtService.getVerifier())
             validate { credential ->
                 val projectId = credential.payload.getClaim(JwtService.CLAIM_PROJECT_ID)?.asString()
-                
-                if (projectId != null) {
+
+                if (projectId != null && tokenBindingService.isBindingSatisfied(credential.payload)) {
                     val scopes = credential.payload.getClaim(JwtService.CLAIM_SCOPE)
                         ?.asList(String::class.java) ?: emptyList()
                     JwtPrincipal(projectId, scopes, credential.payload)

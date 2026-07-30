@@ -35,8 +35,28 @@ class JwtService(services: InjectedServices) : BaseService(), InjectedServices b
     companion object {
         const val CLAIM_PROJECT_ID = "projectId"
         const val CLAIM_EXECUTION_ID = "executionId"
+        const val CLAIM_COMPUTATION_ID = "computationId"
         const val CLAIM_SCOPE = "scope"
-        
+
+        /**
+         * Claim naming the piece of work a token is bound to. A bound token is only accepted while
+         * that work is still in progress, which keeps a long-lived token from outliving its purpose.
+         * Tokens without this claim are only bounded by their expiry.
+         */
+        const val CLAIM_BINDING = "binding"
+
+        /**
+         * Binding value for tokens that are accepted only while the execution named by
+         * [CLAIM_EXECUTION_ID] exists and has not reached a terminal state.
+         */
+        const val BINDING_ACTIVE_EXECUTION = "active-execution"
+
+        /**
+         * Binding value for tokens that are accepted only while the file data computation named by
+         * [CLAIM_COMPUTATION_ID] is still running.
+         */
+        const val BINDING_FILE_DATA_COMPUTATION = "file-data-computation"
+
         const val SCOPE_FILES_READ = "files:read"
         const val SCOPE_FILE_DATA_READ = "file-data:read"
         const val SCOPE_EXECUTION_READ = "execution:read"
@@ -99,32 +119,93 @@ class JwtService(services: InjectedServices) : BaseService(), InjectedServices b
     }
     
     /**
-     * Generates a JWT token for execution operations.
-     * Includes read access to project data and write access to execution progress.
+     * Generates the token an execution node keeps for the duration of a run.
+     *
+     * This is the only token that calls back into this backend: the node reads the project data it
+     * needs and reports progress and the final state with it. It is therefore the only execution
+     * token carrying backend scopes, and it is bound to the execution so that a lifetime long enough
+     * to cover the run does not keep granting access once the run is over.
      *
      * @param projectId The UUID of the project
      * @param executionId The UUID of the execution
-     * @param additionalScopes Additional scopes to include in the token
+     * @param ttlSeconds Token lifetime in seconds. Must outlive the longest expected run, otherwise
+     *   the node cannot report its terminal state.
      * @return The generated JWT token string
      */
-    fun generateExecutionToken(projectId: UUID, executionId: UUID, additionalScopes: List<String>): String {
+    fun generateExecutionRunToken(projectId: UUID, executionId: UUID, ttlSeconds: Long): String {
         val now = Instant.now()
-        val expiration = now.plusSeconds(jwtConfig.expirationSeconds)
-        
+        val expiration = now.plusSeconds(ttlSeconds)
+
         return JWT.create()
             .withIssuer(jwtConfig.issuer)
             .withIssuedAt(Date.from(now))
             .withExpiresAt(Date.from(expiration))
             .withClaim(CLAIM_PROJECT_ID, projectId.toString())
             .withClaim(CLAIM_EXECUTION_ID, executionId.toString())
+            .withClaim(CLAIM_BINDING, BINDING_ACTIVE_EXECUTION)
             .withArrayClaim(CLAIM_SCOPE, arrayOf(
                 SCOPE_FILES_READ,
                 SCOPE_FILE_DATA_READ,
-                SCOPE_EXECUTION_READ
-            ) + additionalScopes)
+                SCOPE_EXECUTION_READ,
+                SCOPE_EXECUTION_WRITE
+            ))
             .sign(algorithm)
     }
-    
+
+    /**
+     * Generates a token authorising a single call this backend makes out to a plugin, such as
+     * fetching an execution's files or cancelling it.
+     *
+     * The plugin only ever presents this token back to itself, to check that the caller may act on
+     * the execution - it never calls this backend with it. It therefore carries no backend scopes at
+     * all, and grants nothing here. Keep it that way: these calls legitimately target executions
+     * that have already finished, so the token cannot be bound to an active execution either, and
+     * scopes it does not need would be the one thing left protecting it.
+     *
+     * @param projectId The UUID of the project
+     * @param executionId The UUID of the execution the plugin call targets
+     * @param pluginScope The single `plugin:execution:*` scope the call requires
+     * @return The generated JWT token string
+     */
+    fun generatePluginExecutionToken(projectId: UUID, executionId: UUID, pluginScope: String): String {
+        val now = Instant.now()
+        val expiration = now.plusSeconds(jwtConfig.expirationSeconds)
+
+        return JWT.create()
+            .withIssuer(jwtConfig.issuer)
+            .withIssuedAt(Date.from(now))
+            .withExpiresAt(Date.from(expiration))
+            .withClaim(CLAIM_PROJECT_ID, projectId.toString())
+            .withClaim(CLAIM_EXECUTION_ID, executionId.toString())
+            .withArrayClaim(CLAIM_SCOPE, arrayOf(pluginScope))
+            .sign(algorithm)
+    }
+
+    /**
+     * Generates a token for a plugin computing file data, bound to that computation.
+     *
+     * The token carries the same read scopes as a project token, so the plugin can fetch the files
+     * and file data it depends on, but is only accepted while [computationId] is still running.
+     *
+     * @param projectId The UUID of the project
+     * @param computationId The UUID of the in-flight computation, as recorded in the database
+     * @return The generated JWT token string
+     */
+    fun generateFileDataComputationToken(projectId: UUID, computationId: UUID): String {
+        val now = Instant.now()
+        val expiration = now.plusSeconds(jwtConfig.expirationSeconds)
+
+        return JWT.create()
+            .withIssuer(jwtConfig.issuer)
+            .withIssuedAt(Date.from(now))
+            .withExpiresAt(Date.from(expiration))
+            .withClaim(CLAIM_PROJECT_ID, projectId.toString())
+            .withClaim(CLAIM_COMPUTATION_ID, computationId.toString())
+            .withClaim(CLAIM_BINDING, BINDING_FILE_DATA_COMPUTATION)
+            .withArrayClaim(CLAIM_SCOPE, arrayOf(SCOPE_FILES_READ, SCOPE_FILE_DATA_READ))
+            .sign(algorithm)
+    }
+
     /**
      * Gets a JWT verifier for validating tokens.
      *

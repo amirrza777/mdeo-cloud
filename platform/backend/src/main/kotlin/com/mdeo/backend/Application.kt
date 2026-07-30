@@ -55,6 +55,7 @@ fun Application.module(appConfig: AppConfig) {
         override val projectService: ProjectService by lazy { ProjectService(this) }
         override val metadataService: MetadataService by lazy { MetadataService(this) }
         override val jwtService: JwtService by lazy { JwtService(this) }
+        override val tokenBindingService: TokenBindingService by lazy { TokenBindingService(this) }
         override val fileDataService: FileDataService by lazy { FileDataService(this) }
         override val executionService: ExecutionService by lazy { ExecutionService(this) }
         override val webSocketNotificationService: WebSocketNotificationService by lazy { WebSocketNotificationService() }
@@ -91,7 +92,12 @@ fun Application.module(appConfig: AppConfig) {
     configureSerialization()
     configureCors(appConfig.cors)
     configureStatusPages()
-    configureAuthentication(services.jwtService, services.userService, appConfig.session)
+    configureAuthentication(
+        services.jwtService,
+        services.userService,
+        services.tokenBindingService,
+        appConfig.session
+    )
     
     install(WebSockets) {
         pingPeriodMillis = 30_000

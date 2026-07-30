@@ -790,8 +790,16 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
         contributionPlugins: List<JsonElement>
     ): CreateExecutionResponse {
         return withContext(Dispatchers.IO) {
-            val token =
-                jwtService.generateExecutionToken(projectId, executionId, listOf(JwtService.SCOPE_EXECUTION_WRITE))
+            // The execution node keeps this token for the entire run and reports progress and the
+            // terminal state with it, so it gets the longer execution lifetime rather than the
+            // general (request-scoped) one. Being bound to the execution keeps that lifetime from
+            // outliving the run: the update that reports the terminal state is the last request the
+            // token is accepted for.
+            val token = jwtService.generateExecutionRunToken(
+                projectId,
+                executionId,
+                ttlSeconds = config.jwt.executionExpirationSeconds
+            )
             val requestBody = json.encodeToString(
                 PluginCreateExecutionRequest.serializer(),
                 PluginCreateExecutionRequest(
@@ -841,10 +849,10 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
         metadata: JsonObject?
     ): List<FileEntry> {
         return withContext(Dispatchers.IO) {
-            val token = jwtService.generateExecutionToken(
+            val token = jwtService.generatePluginExecutionToken(
                 projectId,
                 executionId,
-                listOf(JwtService.SCOPE_PLUGIN_EXECUTION_READ)
+                JwtService.SCOPE_PLUGIN_EXECUTION_READ
             )
             val uri = URI.create(pluginUrl).resolve("$languageId/executions/$executionId/files")
 
@@ -883,10 +891,10 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
         metadata: JsonObject?
     ): String {
         return withContext(Dispatchers.IO) {
-            val token = jwtService.generateExecutionToken(
+            val token = jwtService.generatePluginExecutionToken(
                 projectId,
                 executionId,
-                listOf(JwtService.SCOPE_PLUGIN_EXECUTION_READ)
+                JwtService.SCOPE_PLUGIN_EXECUTION_READ
             )
             val uri = URI.create(pluginUrl).resolve("$languageId/executions/$executionId/summary")
 
@@ -927,10 +935,10 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
         metadata: JsonObject?
     ): ByteArray {
         return withContext(Dispatchers.IO) {
-            val token = jwtService.generateExecutionToken(
+            val token = jwtService.generatePluginExecutionToken(
                 projectId,
                 executionId,
-                listOf(JwtService.SCOPE_PLUGIN_EXECUTION_READ)
+                JwtService.SCOPE_PLUGIN_EXECUTION_READ
             )
             val normalizedPath = normalizePath(path)
             val uri = URI.create(pluginUrl).resolve("$languageId/executions/$executionId/files/$normalizedPath")
@@ -970,10 +978,10 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
         metadata: JsonObject?
     ) {
         withContext(Dispatchers.IO) {
-            val token = jwtService.generateExecutionToken(
+            val token = jwtService.generatePluginExecutionToken(
                 projectId,
                 executionId,
-                listOf(JwtService.SCOPE_PLUGIN_EXECUTION_CANCEL)
+                JwtService.SCOPE_PLUGIN_EXECUTION_CANCEL
             )
             val uri = URI.create(pluginUrl).resolve("$languageId/executions/$executionId/cancel")
 
@@ -1010,10 +1018,10 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
         metadata: JsonObject?
     ) {
         withContext(Dispatchers.IO) {
-            val token = jwtService.generateExecutionToken(
+            val token = jwtService.generatePluginExecutionToken(
                 projectId,
                 executionId,
-                listOf(JwtService.SCOPE_PLUGIN_EXECUTION_DELETE)
+                JwtService.SCOPE_PLUGIN_EXECUTION_DELETE
             )
             val uri = URI.create(pluginUrl).resolve("$languageId/executions/$executionId")
 
