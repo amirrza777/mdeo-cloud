@@ -1,4 +1,4 @@
-import type { Execution } from "../../execution/execution";
+import type { Execution, ExecutionFileEntry } from "../../execution/execution";
 import { showSuccess, showError, showInfo, showWarning } from "@/lib/notifications";
 
 /**
@@ -131,6 +131,67 @@ export interface InitReplyMessage extends WebSocketMessage {
 }
 
 /**
+ * Context identifying and authorizing an execution request.
+ *
+ * This connection is authenticated by its session, so unlike the service-to-service hops of
+ * the same protocol it carries no token — the project id is what the backend checks the
+ * session's permissions against.
+ */
+interface ExecutionWsContext {
+    executionId: string;
+    projectId: string;
+}
+
+/**
+ * Request for an execution's markdown summary, result tree, or a single result file.
+ */
+interface ExecutionWsRequestMessage extends WebSocketMessage {
+    messageType: "exec/summary" | "exec/fileTree" | "exec/file" | "exec/files";
+    requestId: string;
+    context: ExecutionWsContext;
+    path?: string;
+    paths?: string[] | null;
+}
+
+/**
+ * Terminating success response for an execution request.
+ */
+interface ExecutionWsResponseMessage extends WebSocketMessage {
+    messageType: "exec/response";
+    requestId: string;
+    data?: unknown;
+}
+
+/**
+ * Terminating failure response for an execution request.
+ */
+interface ExecutionWsErrorMessage extends WebSocketMessage {
+    messageType: "exec/error";
+    requestId: string;
+    code: string;
+    message: string;
+}
+
+/**
+ * One file of a streaming bulk result load.
+ */
+interface ExecutionFileDataMessage extends WebSocketMessage {
+    messageType: "exec/fileData";
+    requestId: string;
+    path: string;
+    content: string;
+}
+
+/**
+ * How long to wait for an execution request before giving up on it.
+ *
+ * Generous, because a bulk load of a large result set legitimately takes a while, but finite:
+ * without it a request that is lost anywhere in the chain leaves the execution spinning with
+ * nothing to explain why.
+ */
+const EXECUTION_REQUEST_TIMEOUT_MS = 120_000;
+
+/**
  * Connection state for the WebSocket
  */
 export type ConnectionState = "disconnected" | "connecting" | "connected";
@@ -208,6 +269,10 @@ export class WebSocketApi {
     private readonly executionStates: Map<string, string> = new Map();
     private readonly pendingRequests: Map<string, PendingRequest> = new Map();
     private readonly pendingProjectLoads: Map<string, ProjectLoadCallbacks> = new Map();
+    /**
+     * Per-file callbacks of in-flight bulk execution result loads, keyed by request id.
+     */
+    private readonly pendingExecutionFileLoads: Map<string, (path: string, content: string) => void> = new Map();
     private requestIdCounter = 0;
     /**
      * Resolves once the socket is open, rejects if that connection attempt fails;
@@ -388,6 +453,15 @@ export class WebSocketApi {
             case "init/reply":
                 this.handleInitReply(message as InitReplyMessage);
                 break;
+            case "exec/response":
+                this.handleExecutionResponse(message as ExecutionWsResponseMessage);
+                break;
+            case "exec/error":
+                this.handleExecutionError(message as ExecutionWsErrorMessage);
+                break;
+            case "exec/fileData":
+                this.handleExecutionFileData(message as ExecutionFileDataMessage);
+                break;
             default:
                 throw new Error(`Unknown WebSocket message type: ${message.messageType}`);
         }
@@ -502,6 +576,7 @@ export class WebSocketApi {
         }
         this.pendingRequests.clear();
         this.pendingProjectLoads.clear();
+        this.pendingExecutionFileLoads.clear();
 
         // Fail this connection attempt so anyone awaiting ensureConnected() doesn't hang forever.
         if (this.connectedReject) {
@@ -1028,6 +1103,185 @@ export class WebSocketApi {
         });
     }
 
+    // ─── Execution Results ─────────────────────────────────────────────
+
+    /**
+     * Handles a success response for an execution request.
+     *
+     * @param message The execution response message
+     */
+    private handleExecutionResponse(message: ExecutionWsResponseMessage): void {
+        this.pendingExecutionFileLoads.delete(message.requestId);
+        const pending = this.pendingRequests.get(message.requestId);
+        if (pending) {
+            this.pendingRequests.delete(message.requestId);
+            pending.resolve(message.data);
+        }
+    }
+
+    /**
+     * Handles an error response for an execution request.
+     *
+     * @param message The execution error message
+     */
+    private handleExecutionError(message: ExecutionWsErrorMessage): void {
+        this.pendingExecutionFileLoads.delete(message.requestId);
+        const pending = this.pendingRequests.get(message.requestId);
+        if (pending) {
+            this.pendingRequests.delete(message.requestId);
+            pending.reject({ code: message.code, message: message.message });
+        }
+    }
+
+    /**
+     * Handles one file of a streaming bulk result load.
+     *
+     * @param message The file data message
+     */
+    private handleExecutionFileData(message: ExecutionFileDataMessage): void {
+        this.pendingExecutionFileLoads.get(message.requestId)?.(message.path, message.content);
+    }
+
+    /**
+     * Fetches an execution's markdown summary.
+     *
+     * @param projectId The project ID
+     * @param executionId The execution ID
+     * @returns The summary text
+     */
+    async getExecutionSummary(projectId: string, executionId: string): Promise<string> {
+        const data = (await this.sendExecutionRequest("exec/summary", projectId, executionId)) as
+            | { summary?: string }
+            | undefined;
+        return data?.summary ?? "";
+    }
+
+    /**
+     * Fetches an execution's result file tree.
+     *
+     * @param projectId The project ID
+     * @param executionId The execution ID
+     * @returns The entries in the result tree
+     */
+    async getExecutionFileTree(projectId: string, executionId: string): Promise<ExecutionFileEntry[]> {
+        const data = (await this.sendExecutionRequest("exec/fileTree", projectId, executionId)) as
+            | { files?: ExecutionFileEntry[] }
+            | undefined;
+        return data?.files ?? [];
+    }
+
+    /**
+     * Reads a single execution result file.
+     *
+     * @param projectId The project ID
+     * @param executionId The execution ID
+     * @param path Path of the file within the execution results
+     * @returns The file's text content
+     */
+    async getExecutionFile(projectId: string, executionId: string, path: string): Promise<string> {
+        const data = (await this.sendExecutionRequest("exec/file", projectId, executionId, { path })) as
+            | { content?: string }
+            | undefined;
+        return data?.content ?? "";
+    }
+
+    /**
+     * Reads a whole execution result set in one request, reporting each file as it arrives.
+     *
+     * This is what makes opening a completed execution cheap: the same ask used to cost one
+     * request per file on each of the hops between here and the service that stores the
+     * results.
+     *
+     * @param projectId The project ID
+     * @param executionId The execution ID
+     * @param paths Files to read, or null for every file in the result tree
+     * @param onFile Called with each file's path and content as it streams in
+     * @returns The entries that were actually read
+     */
+    async loadExecutionFiles(
+        projectId: string,
+        executionId: string,
+        paths: string[] | null,
+        onFile: (path: string, content: string) => void
+    ): Promise<ExecutionFileEntry[]> {
+        const requestId = this.nextRequestId();
+        this.pendingExecutionFileLoads.set(requestId, onFile);
+        try {
+            const data = (await this.sendExecutionRequestWithId("exec/files", requestId, projectId, executionId, {
+                paths
+            })) as { files?: ExecutionFileEntry[] } | undefined;
+            return data?.files ?? [];
+        } finally {
+            this.pendingExecutionFileLoads.delete(requestId);
+        }
+    }
+
+    private async sendExecutionRequest(
+        messageType: ExecutionWsRequestMessage["messageType"],
+        projectId: string,
+        executionId: string,
+        extra: Record<string, unknown> = {}
+    ): Promise<unknown> {
+        return this.sendExecutionRequestWithId(messageType, this.nextRequestId(), projectId, executionId, extra);
+    }
+
+    private async sendExecutionRequestWithId(
+        messageType: ExecutionWsRequestMessage["messageType"],
+        requestId: string,
+        projectId: string,
+        executionId: string,
+        extra: Record<string, unknown> = {}
+    ): Promise<unknown> {
+        return this.withExecutionTimeout(
+            requestId,
+            messageType,
+            this.sendRequest({
+                messageType,
+                requestId,
+                context: { executionId, projectId },
+                ...extra
+            })
+        );
+    }
+
+    /**
+     * Fails an execution request that never gets an answer.
+     *
+     * Every hop below the backend has its own timeout, but nothing guaranteed one of them
+     * would report back — a request lost in the middle simply left the caller waiting, which
+     * the user sees as an execution that loads forever with nothing to explain it.
+     *
+     * @param requestId The request to stop waiting for
+     * @param messageType The request type, for the error message
+     * @param pending The in-flight request
+     * @returns The response, if it arrives in time
+     */
+    private withExecutionTimeout(requestId: string, messageType: string, pending: Promise<unknown>): Promise<unknown> {
+        return new Promise<unknown>((resolve, reject) => {
+            const timer = setTimeout(() => {
+                this.pendingRequests.delete(requestId);
+                this.pendingExecutionFileLoads.delete(requestId);
+                reject({
+                    code: "Unavailable",
+                    message:
+                        `${messageType} timed out after ${EXECUTION_REQUEST_TIMEOUT_MS / 1000}s. ` +
+                        `The backend or a service behind it did not answer.`
+                });
+            }, EXECUTION_REQUEST_TIMEOUT_MS);
+
+            pending.then(
+                (value) => {
+                    clearTimeout(timer);
+                    resolve(value);
+                },
+                (error: unknown) => {
+                    clearTimeout(timer);
+                    reject(error);
+                }
+            );
+        });
+    }
+
     /**
      * Disconnects the WebSocket connection.
      * Cancels pending reconnect, rejects pending requests, and closes the socket.
@@ -1045,6 +1299,7 @@ export class WebSocketApi {
         }
         this.pendingRequests.clear();
         this.pendingProjectLoads.clear();
+        this.pendingExecutionFileLoads.clear();
 
         if (this.socket) {
             this.socket.close();

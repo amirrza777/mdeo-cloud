@@ -228,9 +228,11 @@ async function handleDownloadReport(): Promise<void> {
 }
 
 async function handleDownloadFiles(): Promise<void> {
-    if (props.executionData.fileTree == undefined && !props.executionData.isLoadingTree) {
-        await workbenchState.loadExecutionFileTree(props.executionData.execution.id);
-    }
+    // The archive needs every result file, so ask for all of them at once rather than for the
+    // tree and then each file: the bulk load answers with the tree too. This also covers the
+    // execution never having been expanded, where nothing is loaded yet.
+    await workbenchState.loadAllExecutionResults(props.executionData.execution.id);
+
     const tree = props.executionData.fileTree;
     if (tree == undefined) {
         return;

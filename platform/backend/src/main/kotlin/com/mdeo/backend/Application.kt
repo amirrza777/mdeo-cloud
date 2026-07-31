@@ -120,7 +120,8 @@ fun Application.module(appConfig: AppConfig) {
                 services.webSocketNotificationService,
                 services.projectService,
                 services.fileService,
-                services.metadataService
+                services.metadataService,
+                services.executionService
             )
             projectRoutes(services.projectService)
             metadataRoutes(services.metadataService, services.projectService)

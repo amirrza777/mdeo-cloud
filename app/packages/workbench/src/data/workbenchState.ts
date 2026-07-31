@@ -37,8 +37,9 @@ import type { ServerPlugin } from "./plugin/serverPlugin";
 import { resolvePlugin } from "./plugin/resolvePlugin";
 import type { ActionStartParams } from "@mdeo/language-common";
 import { parseUri, FileCategory } from "@mdeo/language-common";
-import type { Execution } from "./execution/execution";
+import type { Execution, ExecutionFileEntry } from "./execution/execution";
 import { buildExecutionFileTree } from "./execution/execution";
+import type { ApiResult, ExecutionError } from "./api/apiResult";
 import { showApiError } from "@/lib/notifications";
 import { useDiagnostics, type DiagnosticStore } from "./diagnostics/useDiagnostics";
 
@@ -391,11 +392,47 @@ export class WorkbenchState {
     /**
      * Loads the file tree for a specific execution.
      *
+     * The tree is fetched on its own so it can be shown as soon as it arrives; the files
+     * behind it are pulled in one bulk request in the background, which is what makes opening
+     * any of them afterwards free.
+     *
      * @param executionId The ID of the execution to load the file tree for
      * @returns A promise that resolves when the file tree is loaded
      */
     async loadExecutionFileTree(executionId: string): Promise<void> {
-        if (this.project.value == undefined) {
+        await this.withExecutionTree(executionId, (projectId) =>
+            this.backendApi.executions.loadResults(projectId, executionId)
+        );
+    }
+
+    /**
+     * Loads an execution's file tree *and* the content of every file in it.
+     *
+     * For an execution the user never expanded, this is a single round trip — the bulk load
+     * answers with the tree as well — where fetching the tree first and the files second
+     * would traverse the results twice over three hops.
+     *
+     * @param executionId The ID of the execution to load
+     * @returns A promise that resolves when every result file is available
+     */
+    async loadAllExecutionResults(executionId: string): Promise<void> {
+        await this.withExecutionTree(executionId, (projectId) =>
+            this.backendApi.executions.loadAllResults(projectId, executionId)
+        );
+    }
+
+    /**
+     * Runs a result load against the current project and installs the resulting tree.
+     *
+     * @param executionId The ID of the execution being loaded
+     * @param load Performs the load and returns the result tree entries
+     */
+    private async withExecutionTree(
+        executionId: string,
+        load: (projectId: string) => Promise<ApiResult<ExecutionFileEntry[], ExecutionError>>
+    ): Promise<void> {
+        const project = this.project.value;
+        if (project == undefined) {
             return;
         }
 
@@ -404,19 +441,25 @@ export class WorkbenchState {
             return;
         }
 
-        executionData.isLoadingTree = true;
-
-        const result = await this.backendApi.executions.get(this.project.value.id, executionId);
-
-        if (result.success) {
-            executionData.execution = result.value.execution;
-            executionData.fileTree = result.value.fileTree
-                ? buildExecutionFileTree(result.value.fileTree, executionId, this.project.value.id)
-                : undefined;
-            executionData.isLoadingTree = false;
-        } else {
-            showApiError("load execution file tree", result.error.message);
-            executionData.isLoadingTree = false;
+        // Only claim to be loading the tree when there is no tree yet. A load that already has
+        // one — downloading the results of an execution the user expanded a moment ago — would
+        // otherwise replace the rendered file list with a spinner and look like it was fetching
+        // everything a second time.
+        const showsProgress = executionData.fileTree == undefined;
+        if (showsProgress) {
+            executionData.isLoadingTree = true;
+        }
+        try {
+            const result = await load(project.id);
+            if (result.success) {
+                executionData.fileTree = buildExecutionFileTree(result.value, executionId, project.id);
+            } else {
+                showApiError("load execution file tree", result.error.message);
+            }
+        } finally {
+            if (showsProgress) {
+                executionData.isLoadingTree = false;
+            }
         }
     }
 

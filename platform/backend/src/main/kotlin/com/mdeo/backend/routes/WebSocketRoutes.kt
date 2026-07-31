@@ -3,9 +3,11 @@ package com.mdeo.backend.routes
 import com.mdeo.backend.plugins.getUserSession
 import com.mdeo.backend.plugins.isAdmin
 import com.mdeo.backend.service.*
+import com.mdeo.common.transport.ExecutionWsProtocol
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
+import kotlinx.coroutines.launch
 import kotlinx.serialization.json.*
 import org.slf4j.LoggerFactory
 import java.util.*
@@ -20,12 +22,14 @@ private val logger = LoggerFactory.getLogger("WebSocketRoutes")
  * @param projectService Service for validating project access
  * @param fileService Service for file CRUD operations
  * @param metadataService Service for file metadata operations
+ * @param executionService Service for execution result operations
  */
 fun Route.webSocketRoutes(
     webSocketService: WebSocketNotificationService,
     projectService: ProjectService,
     fileService: FileService,
-    metadataService: MetadataService
+    metadataService: MetadataService,
+    executionService: ExecutionService
 ) {
     webSocket("/api/ws") {
         val session = call.getUserSession()
@@ -43,6 +47,7 @@ fun Route.webSocketRoutes(
             projectService = projectService,
             fileService = fileService,
             metadataService = metadataService,
+            executionService = executionService,
             session = this
         )
         
@@ -62,6 +67,7 @@ fun Route.webSocketRoutes(
  * @property projectService Service for validating project access
  * @property fileService Service for file CRUD operations
  * @property metadataService Service for file metadata operations
+ * @property executionService Service for execution result operations
  * @property session The WebSocket session
  */
 private class WebSocketMessageHandler(
@@ -72,6 +78,7 @@ private class WebSocketMessageHandler(
     private val projectService: ProjectService,
     private val fileService: FileService,
     private val metadataService: MetadataService,
+    private val executionService: ExecutionService,
     private val session: DefaultWebSocketServerSession
 ) {
     private val json = Json { ignoreUnknownKeys = true }
@@ -81,6 +88,14 @@ private class WebSocketMessageHandler(
         isGlobalAdmin = isGlobalAdmin,
         fileService = fileService,
         metadataService = metadataService,
+        projectService = projectService,
+        webSocketService = webSocketService
+    )
+    private val executionHandler = WebSocketExecutionHandler(
+        connectionId = connectionId,
+        userId = userId,
+        isGlobalAdmin = isGlobalAdmin,
+        executionService = executionService,
         projectService = projectService,
         webSocketService = webSocketService
     )
@@ -134,7 +149,18 @@ private class WebSocketMessageHandler(
     private suspend fun processMessage(text: String) {
         val jsonElement = json.parseToJsonElement(text)
         val type = jsonElement.jsonObject["messageType"]?.jsonPrimitive?.content
-        
+
+        // Execution result requests use the protocol shared with the plugin and execution
+        // services rather than this connection's own message types, so they are decoded with
+        // that protocol's codec. They are also handled off the read loop: a bulk load streams
+        // a whole result set and would otherwise hold up the file operations the editor needs
+        // to keep saving in the meantime.
+        if (type != null && type.startsWith("exec/")) {
+            val request = ExecutionWsProtocol.decode(text)
+            session.launch { executionHandler.handle(request) }
+            return
+        }
+
         when (type) {
             "event/subscribe" -> handleSubscribe(jsonElement)
             "event/unsubscribe" -> handleUnsubscribe(jsonElement)

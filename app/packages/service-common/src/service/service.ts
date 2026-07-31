@@ -10,6 +10,7 @@ import { buildManifest } from "./util.js";
 import type { FileInfo } from "../handler/types.js";
 import type { ExecutionContext, ExecutionMetadata, ExecutionRequestContext } from "../execution/types.js";
 import { JwtAuthMiddleware } from "../auth/jwtAuth.js";
+import { attachExecutionWebSocketServer } from "../ws/executionWsServer.js";
 
 /**
  * Default maximum size in bytes of a request body accepted by a language service.
@@ -79,7 +80,7 @@ export async function createLanguageService<T>(config: ServiceConfig<T>): Promis
             transport: {
                 target: "pino-pretty"
             },
-            level: "warn"
+            level: process.env.LOG_LEVEL ?? "warn"
         }
     });
 
@@ -683,6 +684,30 @@ export async function createLanguageService<T>(config: ServiceConfig<T>): Promis
             }
         );
     }
+
+    // The execution result endpoints above cost the backend one request per file, and the
+    // backend is itself one hop in a longer chain. This serves the same operations over a
+    // connection the backend keeps between requests, plus a bulk read that returns a whole
+    // result set under a single request.
+    attachExecutionWebSocketServer(fastify.server, {
+        jwtAuth,
+        resolveLanguage: (languageId) => {
+            const languageHandler = languageHandlers.get(languageId);
+            const handler = languageHandler?.config.executionHandlers?.[0];
+            if (!languageHandler || !handler) {
+                return undefined;
+            }
+            return {
+                handler,
+                acquire: (jwt, project) => languageHandler.pool.acquire([], jwt, project),
+                release: (instance) => languageHandler.pool.release(instance)
+            };
+        },
+        log: {
+            warn: (message) => fastify.log.warn(message),
+            error: (message) => fastify.log.error(message)
+        }
+    });
 
     return fastify;
 }

@@ -31,12 +31,14 @@
         "typir": "^0.3.3",
         "typir-langium": "^0.3.3",
         "vscode-jsonrpc": "8.2.0",
-        "vscode-languageserver-types": "^3.17.5",
         "vscode-languageserver-protocol": "^3.17.5",
-        "vscode-uri": "^3.1.0"
+        "vscode-languageserver-types": "^3.17.5",
+        "vscode-uri": "^3.1.0",
+        "ws": "^8.21.1"
     },
     "devDependencies": {
         "@types/node": "^25.3.1",
+        "@types/ws": "^8.18.1",
         "pino-pretty": "^13.1.3"
     }
 }
