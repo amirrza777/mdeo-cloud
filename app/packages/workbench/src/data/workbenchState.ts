@@ -79,6 +79,17 @@ export class WorkbenchState {
     readonly sidebarCollapsed = ref(false);
 
     /**
+     * The text the search panel searches for
+     */
+    readonly searchText = ref("");
+
+    /**
+     * Counter that is increased every time the search panel is revealed,
+     * used by the panel to focus its input
+     */
+    readonly searchRevealCounter = ref(0);
+
+    /**
      * Internal ref for the currently loaded project
      */
     private readonly _project = ref<Project>();
@@ -246,6 +257,20 @@ export class WorkbenchState {
         this.fileTree = useFileTree(monacoApi, this);
         this.initializeWebSocket();
         this.initiLsp();
+    }
+
+    /**
+     * Opens the search panel and focuses its input.
+     *
+     * @param searchText the text to search for, the current search text is kept if it is not provided
+     */
+    revealSearch(searchText?: string): void {
+        if (searchText != undefined && searchText.length > 0) {
+            this.searchText.value = searchText;
+        }
+        this.activeSidebar.value = "search";
+        this.sidebarCollapsed.value = false;
+        this.searchRevealCounter.value++;
     }
 
     /**
