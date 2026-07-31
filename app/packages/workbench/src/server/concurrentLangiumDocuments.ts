@@ -44,6 +44,13 @@ export class ConcurrentLangiumDocuments extends DefaultLangiumDocuments {
     /**
      * Whether the given URI belongs to one of the worker's active projects.
      *
+     * The URI must also name one of the known categories (`files` or `executions`). A relative
+     * import with one `..` too many climbs out of `{projectId}/files` and lands directly under
+     * `{projectId}`, where `parseUri` falls back to treating the remainder as a project-relative
+     * path — so `../foo.mm` next to a file already at the project root used to resolve back to
+     * `foo.mm` and look perfectly valid. Refusing to register those URIs leaves the document
+     * unresolved, which is what lets the import be reported as broken.
+     *
      * @param uri The document URI to check
      * @returns `true` if the URI is in an active project (or the project scope is
      *          not yet known), `false` otherwise
@@ -54,7 +61,11 @@ export class ConcurrentLangiumDocuments extends DefaultLangiumDocuments {
             return true;
         }
         const projectId = getProjectIdFromPath(uri.path);
-        return projectId != undefined && scope.has(projectId);
+        if (projectId == undefined || !scope.has(projectId)) {
+            return false;
+        }
+        const category = uri.path.substring(1).split("/")[1];
+        return category === "files" || category === "executions";
     }
 
     override addDocument(document: LangiumDocument): void {

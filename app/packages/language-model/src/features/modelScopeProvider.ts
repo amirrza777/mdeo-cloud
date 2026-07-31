@@ -1,6 +1,14 @@
 import { type AstReflection, type ExtendedLangiumServices } from "@mdeo/language-common";
 import { sharedImport, resolveRelativePath } from "@mdeo/language-shared";
-import type { AstNodeDescriptionProvider, LangiumDocuments, ReferenceInfo, Scope } from "langium";
+import type {
+    AstNode,
+    AstNodeDescription,
+    AstNodeDescriptionProvider,
+    DocumentCache as DocumentCacheType,
+    LangiumDocuments,
+    ReferenceInfo,
+    Scope
+} from "langium";
 import {
     ObjectInstance,
     PropertyAssignment,
@@ -24,7 +32,8 @@ import {
 } from "@mdeo/language-metamodel";
 import { AssociationEndCache } from "./associationEndCache.js";
 
-const { DefaultScopeProvider, AstUtils, EMPTY_SCOPE } = sharedImport("langium");
+const { DefaultScopeProvider, AstUtils, EMPTY_SCOPE, MapScope, DocumentCache, DocumentState } =
+    sharedImport("langium");
 
 /**
  * The scope provider for the Model language.
@@ -52,6 +61,16 @@ export class ModelScopeProvider extends DefaultScopeProvider {
     private readonly descriptionProvider: AstNodeDescriptionProvider;
 
     /**
+     * Cache of the scope over a model's object instances, keyed by the model node.
+     *
+     * Every link end resolves its `object` reference against every object in the model, so this
+     * scope is requested once per link end. Rebuilding it each time — and scanning it linearly to
+     * find one name — made linking cost O(objects * links), which is minutes rather than seconds
+     * on large models (16k objects and 35k links take over five minutes uncached).
+     */
+    private readonly objectInstanceScopeCache: DocumentCacheType<ModelType, Scope>;
+
+    /**
      * Constructs a new ModelScopeProvider.
      * @param services The extended Langium services.
      */
@@ -61,6 +80,7 @@ export class ModelScopeProvider extends DefaultScopeProvider {
         this.associationEndCache = new AssociationEndCache(services);
         this.documents = services.shared.workspace.LangiumDocuments;
         this.descriptionProvider = services.workspace.AstNodeDescriptionProvider;
+        this.objectInstanceScopeCache = new DocumentCache(services.shared, DocumentState.Linked);
     }
 
     /**
@@ -191,11 +211,38 @@ export class ModelScopeProvider extends DefaultScopeProvider {
     private getObjectInstancesScope(context: ReferenceInfo): Scope {
         const model = AstUtils.getContainerOfType(context.container, (node) =>
             this.astReflection.isInstance(node, Model)
-        );
+        ) as ModelType | undefined;
         if (model == undefined) {
             return EMPTY_SCOPE;
         }
-        return this.createScopeForNodes(model.objects);
+        const document = AstUtils.getDocument(model);
+        return this.objectInstanceScopeCache.get(document.uri, model, () =>
+            this.createMapScopeForNodes(model.objects)
+        );
+    }
+
+    /**
+     * Builds a scope over the given nodes that looks names up by hash rather than by scanning.
+     *
+     * {@link DefaultScopeProvider.createScopeForNodes} returns a stream-backed scope, which has to
+     * walk every element (creating a description for each) to answer a single lookup. That is fine
+     * for the handful of elements the metamodel scopes hold, but not for the object instances of a
+     * large model, which are looked up once per link end.
+     *
+     * Duplicate names keep the first node, matching what the stream-backed scope resolved to.
+     *
+     * @param nodes The nodes to expose in the scope
+     * @returns A scope resolving those nodes by name in constant time
+     */
+    private createMapScopeForNodes(nodes: Iterable<AstNode>): Scope {
+        const descriptions = new Map<string, AstNodeDescription>();
+        for (const node of nodes) {
+            const name = this.nameProvider.getName(node);
+            if (name != undefined && !descriptions.has(name)) {
+                descriptions.set(name, this.descriptionProvider.createDescription(node, name));
+            }
+        }
+        return new MapScope(descriptions.values());
     }
 
     /**
