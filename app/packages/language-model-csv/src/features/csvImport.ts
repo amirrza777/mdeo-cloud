@@ -29,7 +29,18 @@ export function importCsvEntries(
 
     const idMap = new Map<string, string>();
 
-    for (const entry of entries) {
+    /**
+     * Row numbering restarts at zero for every entry, but two entries can import
+     * the same class from different files, which would then generate the same
+     * instance names twice. Each entry is numbered from the count of rows already
+     * imported for its class, so names stay unique across the whole model. Links
+     * refer to instances by name, so a collision would silently point at the
+     * wrong object.
+     */
+    const nameOffsets = new Map<number, number>();
+    const rowsPerClass = new Map<string, number>();
+
+    for (const [entryIndex, entry] of entries.entries()) {
         const classInfo = metamodelClasses.find(c => c.name === entry.className);
         if (!classInfo) {
             warnings.push(`Class '${entry.className}' not found in metamodel — skipping.`);
@@ -52,9 +63,13 @@ export function importCsvEntries(
             warnings.push(`CSV for '${entry.className}' has unknown columns: ${unknownCols.join(", ")} — they will be ignored.`);
         }
 
+        const nameOffset = rowsPerClass.get(entry.className) ?? 0;
+        nameOffsets.set(entryIndex, nameOffset);
+        rowsPerClass.set(entry.className, nameOffset + dataRows.length);
+
         dataRows.forEach((row, rowIndex) => {
             const normalizedRow = normalizeRow(row, header.length, rowIndex + 2, warnings);
-            const instanceName = `${entry.className}_${rowIndex}`;
+            const instanceName = `${entry.className}_${nameOffset + rowIndex}`;
 
             if (idColIndex >= 0) {
                 const idValue = normalizedRow[idColIndex];
@@ -79,7 +94,7 @@ export function importCsvEntries(
         });
     }
 
-    for (const entry of entries) {
+    for (const [entryIndex, entry] of entries.entries()) {
         const classInfo = metamodelClasses.find(c => c.name === entry.className);
         if (!classInfo) continue;
 
@@ -96,9 +111,11 @@ export function importCsvEntries(
 
         if (refCols.length === 0) continue;
 
+        const nameOffset = nameOffsets.get(entryIndex) ?? 0;
+
         dataRows.forEach((row, rowIndex) => {
             const normalizedRow = normalizeRow(row, header.length, rowIndex + 2, warnings);
-            const sourceInstanceName = `${entry.className}_${rowIndex}`;
+            const sourceInstanceName = `${entry.className}_${nameOffset + rowIndex}`;
 
             refCols.forEach(colName => {
                 const prop = classInfo.properties.find(p => p.name === colName)!;
