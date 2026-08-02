@@ -148,23 +148,22 @@ export interface ExecuteResponse {
 }
 
 /**
- * Entry in a file tree.
+ * Entry in an execution result tree.
+ *
+ * This is the shape execution services actually produce and the backend actually decodes:
+ * a path and the platform's numeric file type, matching `FileEntry` in the platform's shared
+ * Kotlin model.
  */
-export interface FileEntry {
+export interface ExecutionResultEntry {
     /**
-     * Path to the file or directory
+     * Path of the file or directory within the execution results.
      */
-    path: string;
+    name: string;
 
     /**
-     * Whether this is a directory
+     * 1 for a file, 2 for a directory.
      */
-    isDirectory: boolean;
-
-    /**
-     * File size in bytes (only for files)
-     */
-    size?: number;
+    type: number;
 }
 
 /**
@@ -214,7 +213,7 @@ export interface ExecutionHandler<T = unknown> {
      * @param jwt JWT token for authentication
      * @returns Promise resolving to the list of files and directories
      */
-    getFileTree(context: ExecutionRequestContext): Promise<FileEntry[]>;
+    getFileTree(context: ExecutionRequestContext): Promise<ExecutionResultEntry[]>;
     /**
      * Reads a specific file from the execution results.
      *
@@ -224,6 +223,27 @@ export interface ExecutionHandler<T = unknown> {
      * @returns Promise resolving to the file contents
      */
     getFile(context: ExecutionRequestContext, path: string): Promise<Buffer>;
+
+    /**
+     * Reads many result files at once, reporting each through `onFile` as it arrives.
+     *
+     * Reading a result set one file at a time costs a request per file on every hop between
+     * the browser and whatever stores the results. Implementing this lets a handler forward
+     * the whole ask to what it proxies as a single request; handlers that leave it out still
+     * get the benefit one hop up, because the service falls back to `getFileTree` plus a
+     * `getFile` per entry on their behalf.
+     *
+     * @param context The execution request context
+     * @param paths Files to read, or null for every file in the result tree
+     * @param onFile Called with each file's path and text content as it becomes available
+     * @returns The entries that were actually read
+     */
+    getFiles?(
+        context: ExecutionRequestContext,
+        paths: string[] | null,
+        onFile: (path: string, content: string) => void
+    ): Promise<ExecutionResultEntry[]>;
+
     /**
      * Cancels a running execution.
      *

@@ -5,6 +5,7 @@ import com.mdeo.metamodel.data.MetamodelData
 import com.mdeo.modeltransformation.ast.patterns.TypedPatternLinkElement
 import com.mdeo.modeltransformation.ast.patterns.TypedPatternObjectInstanceElement
 import com.mdeo.modeltransformation.compiler.VariableBinding
+import com.mdeo.modeltransformation.graph.ModelStatistics
 import com.mdeo.modeltransformation.runtime.match.ExpressionNodeAnalyzer
 import com.mdeo.modeltransformation.runtime.match.IslandTraversalUtils
 import com.mdeo.modeltransformation.runtime.match.PatternCategories
@@ -26,13 +27,36 @@ import com.mdeo.modeltransformation.runtime.match.PatternCategories
  *           emitted as simple vertex-property filters.
  * @property metamodelData The metamodel used for association lookups, BFS link ordering,
  *           and pseudo-composition priority computation.
+ * @property statistics Cardinality snapshot of the model to be matched. When supplied, the
+ *           structural order is chosen by estimated branching factor ([MatchCostModel]);
+ *           when `null`, the purely structural pseudo-composition heuristic is used.
  */
 internal class MatchPlanBuilder(
     private val getVertexId: (String) -> Any?,
     private val nodeAnalyzer: ExpressionNodeAnalyzer,
     private val isCollectionExpression: (TypedExpression) -> Boolean,
-    private val metamodelData: MetamodelData = MetamodelData.empty()
+    private val metamodelData: MetamodelData = MetamodelData.empty(),
+    private val statistics: ModelStatistics? = null
 ) {
+
+    companion object {
+        /**
+         * A step must be estimated *strictly below* this to count as shrinking the
+         * partial-match set, which is the only case in which the cost model overrides the
+         * planner's pre-existing order; see [PlanExecution.candidateComparator].
+         */
+        private const val SHRINKING_FACTOR = 1.0
+
+        /**
+         * When this system property is set, the structural step order chosen by
+         * [PlanExecution.buildStructuralOrder] is printed.
+         *
+         * `mdeo.debug.matchplan` shows the finished plan, in which the scans and walks are
+         * interleaved with the constraints they unlock; this shows the join order alone,
+         * which is what decides how large the intermediate results get.
+         */
+        const val DEBUG_STRUCTURAL_ORDER_PROPERTY = "mdeo.debug.structuralorder"
+    }
     /**
      * Builds a [MatchPlan] for the given pattern [elements].
      *
@@ -42,7 +66,10 @@ internal class MatchPlanBuilder(
      * @return A [MatchPlan] containing the ordered list of [BaseStep]s to execute.
      */
     fun build(elements: PatternCategories, referencedInstances: Set<String>): MatchPlan {
-        val graph = MatchPlanGraph.create(elements, referencedInstances, getVertexId, nodeAnalyzer, isCollectionExpression, metamodelData)
+        val graph = MatchPlanGraph.create(
+            elements, referencedInstances, getVertexId, nodeAnalyzer,
+            isCollectionExpression, metamodelData, statistics
+        )
         return PlanExecution(graph).run()
     }
 
@@ -106,6 +133,19 @@ internal class MatchPlanBuilder(
     private sealed class TraversalCandidate {
         abstract val classPriority: Int
         abstract val nacUnlockCost: Int
+
+        /**
+         * Name of the instance this candidate would cover. Used as the final, purely
+         * lexicographic tie-breaker so that plan construction stays deterministic.
+         */
+        abstract val targetName: String
+
+        /**
+         * Estimated factor by which accepting this candidate multiplies the number of
+         * partial matches, as produced by [MatchCostModel]; `Double.NaN` when no statistics
+         * are available.  Lower is better.
+         */
+        abstract val branchingFactor: Double
     }
 
     /**
@@ -114,12 +154,16 @@ internal class MatchPlanBuilder(
      * @property instance The instance element to be covered.
      * @property classPriority See [TraversalCandidate.classPriority].
      * @property nacUnlockCost See [TraversalCandidate.nacUnlockCost].
+     * @property branchingFactor See [TraversalCandidate.branchingFactor].
      */
     private data class ScanCandidate(
         val instance: TypedPatternObjectInstanceElement,
         override val classPriority: Int,
-        override val nacUnlockCost: Int
-    ) : TraversalCandidate()
+        override val nacUnlockCost: Int,
+        override val branchingFactor: Double
+    ) : TraversalCandidate() {
+        override val targetName: String get() = instance.objectInstance.name
+    }
 
     /**
      * A candidate that covers an uncovered instance by emitting a [BaseStep.EdgeWalk].
@@ -127,20 +171,23 @@ internal class MatchPlanBuilder(
      * @property walkOption The walk option describing the link to traverse.
      * @property classPriority See [TraversalCandidate.classPriority].
      * @property nacUnlockCost See [TraversalCandidate.nacUnlockCost].
+     * @property branchingFactor See [TraversalCandidate.branchingFactor].
      */
     private data class WalkCandidate(
         val walkOption: WalkOption,
         override val classPriority: Int,
-        override val nacUnlockCost: Int
-    ) : TraversalCandidate()
+        override val nacUnlockCost: Int,
+        override val branchingFactor: Double
+    ) : TraversalCandidate() {
+        override val targetName: String get() = walkOption.toInstanceName
+    }
 
     /**
      * An intermediate representation of one step in the structural (traversal-order)
      * phase of plan construction.
      *
-     * Structural steps are assembled by [PlanExecution.buildStructuralOrder], optionally
-     * reordered by [PlanExecution.applyPostReordering], and then converted to concrete
-     * [BaseStep]s by [PlanExecution.emitPlanFromStructuralOrder].
+     * Structural steps are assembled by [PlanExecution.buildStructuralOrder] and then
+     * converted to concrete [BaseStep]s by [PlanExecution.emitPlanFromStructuralOrder].
      */
     private sealed class StructuralStep {
         /**
@@ -229,14 +276,13 @@ internal class MatchPlanBuilder(
         /**
          * Orchestrates the structural ordering phase.
          *
-         * Delegates to [buildStructuralOrder] for greedy candidate selection, then
-         * applies [applyPostReordering] for the 1-side-demotion optimisation, and
-         * finally calls [emitPlanFromStructuralOrder] to convert structural steps to
-         * [BaseStep]s.
+         * Delegates to [buildStructuralOrder] for greedy candidate selection, then calls
+         * [emitPlanFromStructuralOrder] to convert structural steps to [BaseStep]s.
          */
         private fun buildTraversalOrder() {
             val structural = buildStructuralOrder().toMutableList()
-            applyPostReordering(structural)
+            val debug = System.getProperty(DEBUG_STRUCTURAL_ORDER_PROPERTY) != null
+            if (debug) println("[structural] order:  " + structural.joinToString(" | ") { describe(it) })
             emitPlanFromStructuralOrder(structural)
         }
 
@@ -247,9 +293,10 @@ internal class MatchPlanBuilder(
          * 1. If any instance has a pre-bound vertex ID, it is selected unconditionally
          *    (highest priority regardless of class score).
          * 2. Otherwise, all typed-scan candidates and all available walk candidates are
-         *    scored by: (a) descending pseudo-composition priority and (b) ascending cost
-         *    of the cheapest application condition newly unlocked by that coverage.  Ties
-         *    are broken by preferring walks over scans (walks are cheaper than scans).
+         *    scored and the cheapest is taken; see [candidateComparator] for the ordering.
+         *    With model statistics available the primary criterion is the estimated
+         *    branching factor ([estimateBranchingFactor]); without them it is the
+         *    pseudo-composition priority, as before.
          * 3. The highest-scoring candidate is selected and its target instance is marked
          *    as covered.  New walk options incident on the newly covered instance are
          *    added.
@@ -272,6 +319,9 @@ internal class MatchPlanBuilder(
             val covered = mutableSetOf<String>()
             val walkedLinks = mutableSetOf<TypedPatternLinkElement>()
             val result = mutableListOf<StructuralStep>()
+            val comparators = HashMap<Boolean, Comparator<TraversalCandidate>>()
+            fun comparator(costModel: MatchCostModel?) =
+                comparators.getOrPut(costModel != null) { candidateComparator(costModel) }
 
             while (uncovered.isNotEmpty() || availableWalks.isNotEmpty()) {
                 val preBound = uncovered.firstOrNull { getVertexId(it.objectInstance.name) != null }
@@ -284,28 +334,52 @@ internal class MatchPlanBuilder(
                     continue
                 }
 
+                val walkable = availableWalks.filter { it.toInstanceName !in covered }
+
+                // An instance that can be reached by a walk is never worth scanning for.
+                // The walk yields the neighbours of an already-covered vertex, which are a
+                // subset of the class extent a scan would read, and it consumes the link
+                // that a scan would afterwards have to verify as a cycle closure — so both
+                // routes produce exactly the same partial matches, one of them for a
+                // fraction of the work. The estimator cannot see this on its own: it scores
+                // a step by how many partial matches it *produces*, and the cycle-closure
+                // term makes such a scan look as selective as the walk it duplicates, which
+                // is how `V(HospitalisationShift)` came to be chosen over a to-one walk from
+                // an already-bound RoomShiftAssignment.
+                val walkTargets = walkable.mapTo(HashSet()) { it.toInstanceName }
+                val scannable = uncovered.filter {
+                    it.objectInstance.className != null && it.objectInstance.name !in walkTargets
+                }
+                if (scannable.isEmpty() && walkable.isEmpty()) break
+
+                // With a single option there is nothing to order, so neither the estimates nor
+                // the structural scores are computed. Small patterns hit this on every step.
+                val onlyChoice = scannable.size + walkable.size == 1
+                val costModel = if (onlyChoice) null else graph.costModel
+
                 val candidates = mutableListOf<TraversalCandidate>()
-                for (inst in uncovered) {
-                    if (inst.objectInstance.className == null) continue
+                for (inst in scannable) {
                     val name = inst.objectInstance.name
-                    val prio = graph.instancePriorities[name] ?: 0
-                    val nacCost = minConditionCostUnlockedBy(covered + name, covered)
-                    candidates.add(ScanCandidate(inst, prio, nacCost))
+                    val prio = if (onlyChoice) 0 else graph.instancePriorities[name] ?: 0
+                    val nacCost =
+                        if (onlyChoice) 0 else minConditionCostUnlockedBy(covered + name, covered)
+                    val factor = costModel?.let {
+                        estimateBranchingFactor(it, name, it.scanFactor(inst), covered, coveringLink = null)
+                    } ?: Double.NaN
+                    candidates.add(ScanCandidate(inst, prio, nacCost, factor))
                 }
-                for (walk in availableWalks) {
-                    if (walk.toInstanceName in covered) continue
-                    val prio = graph.instancePriorities[walk.toInstanceName] ?: 0
-                    val nacCost = minConditionCostUnlockedBy(covered + walk.toInstanceName, covered)
-                    candidates.add(WalkCandidate(walk, prio, nacCost))
+                for (walk in walkable) {
+                    val prio = if (onlyChoice) 0 else graph.instancePriorities[walk.toInstanceName] ?: 0
+                    val nacCost = if (onlyChoice) 0
+                                  else minConditionCostUnlockedBy(covered + walk.toInstanceName, covered)
+                    val factor = costModel?.let {
+                        val base = it.walkFactor(walk.link, walk.isReversed, walk.toInstance)
+                        estimateBranchingFactor(it, walk.toInstanceName, base, covered, walk.link)
+                    } ?: Double.NaN
+                    candidates.add(WalkCandidate(walk, prio, nacCost, factor))
                 }
 
-                if (candidates.isEmpty()) break
-
-                val best = candidates.minWith(
-                    compareByDescending<TraversalCandidate> { it.classPriority }
-                        .thenBy { it.nacUnlockCost }
-                        .thenBy { if (it is ScanCandidate) 1 else 0 }
-                )
+                val best = if (onlyChoice) candidates.first() else candidates.minWith(comparator(costModel))
 
                 when (best) {
                     is ScanCandidate -> {
@@ -343,88 +417,177 @@ internal class MatchPlanBuilder(
         }
 
         /**
-         * Applies the **1-side demotion** optimisation to the structural step list
-         * in-place.
+         * Returns the comparator that decides which candidate the greedy loop takes next.
          *
-         * For each [StructuralStep.CoverByWalk] at position k (walk `fromName →
-         * toName`):
-         * - If `toName` is at the **1-multiplicity side** of the association (at most
-         *   one `toName` vertex exists per `fromName` vertex);
-         * - And `fromName` was covered by an unconditional [StructuralStep.CoverByVertex]
-         *   (no pre-bound vertex ID) at some earlier position `scanIdx`;
-         * - And no other walk from `fromName` lies strictly between `scanIdx` and k;
-         * - And no pending application condition requires `fromName` but not `toName`
-         *   (a safety check to prevent condition readiness from regressing):
+         * **Without statistics** ([costModel] `null`) the original ordering is used unchanged.
          *
-         * → The scan at `scanIdx` is replaced by a scan of `toName`, and the walk at k
-         *   is reversed to `toName → fromName`.
+         * **With statistics** the estimate is consulted only where it is a fair comparison:
          *
-         * **Rationale:** Starting a traversal at the 1-side is more selective (the scan
-         * finds at most one vertex per type when the multiplicity upper bound is 1), and
-         * walking backwards to the many-side fans out naturally.
+         * 1. **A non-increasing step beats a fan-out.** A candidate whose estimated branching
+         *    factor is at most [NON_INCREASING_FACTOR] cannot enlarge the partial-match set,
+         *    so doing it earlier can only shrink what every later step processes — it weakly
+         *    dominates every alternative regardless of the rest of the plan. This is what
+         *    fixes the pathologies the cost model exists for: a constant guard on a singleton
+         *    class (factor 0.1), a class with no instances at all (factor 0), a to-one walk.
+         * 2. **Between two candidates of the same kind, the smaller factor wins.** Two scans
+         *    cost the same to run, as do two walks, so their output sizes are directly
+         *    comparable — this is the classic model-sensitive rule, and it is what picks the
+         *    right starting class and the right walk order.
+         * 3. **Between a scan and a walk that both fan out, the estimate is not used**; the
+         *    legacy structural criteria decide.
          *
-         * @param structural The structural step list to reorder in-place.
+         * Rule 3 exists because the branching factor measures how many partial matches a step
+         * *produces*, not what it *costs*. A [BaseStep.VertexScan] re-reads the whole vertex
+         * list for every incoming traverser, while a walk only visits its fan-out, so the two
+         * are not on the same scale. Ordering across kinds by factor alone reliably chose a
+         * small fan-out ahead of a mid-sized scan and then paid for that scan once per
+         * traverser, and it also demoted the "unlock a cheap application condition early"
+         * rule that does the real pruning in NAC-heavy patterns. Measured as ~25 % slower on
+         * the scrum case study for no measurable gain elsewhere; see
+         * `tools/MATCH_PLANNER_COST_MODEL_REPORT.md`.
+         *
+         * Wherever the estimates are equal within [MatchCostModel.approximatelyEqual], the
+         * legacy tie-breakers decide, so a model whose statistics carry no signal keeps
+         * producing exactly the legacy order.
+         *
+         * @param costModel The cost model, or `null` when no statistics were supplied.
          */
-        private fun applyPostReordering(structural: MutableList<StructuralStep>) {
-            val assocByProps = graph.metamodelData.associations.associateBy { assoc ->
-                assoc.source.name to assoc.target.name
+        private fun candidateComparator(costModel: MatchCostModel?): Comparator<TraversalCandidate> {
+            val legacy = compareByDescending<TraversalCandidate> { it.classPriority }
+                .thenBy { it.nacUnlockCost }
+                .thenBy { if (it is ScanCandidate) 1 else 0 }
+            if (costModel == null) return legacy
+
+            return Comparator<TraversalCandidate> { a, b ->
+                val aShrinks = a.branchingFactor < SHRINKING_FACTOR
+                val bShrinks = b.branchingFactor < SHRINKING_FACTOR
+                when {
+                    // A step that strictly shrinks the result is taken ahead of one that
+                    // does not; among several, the one that shrinks it most.
+                    aShrinks != bShrinks -> if (aShrinks) -1 else 1
+                    !aShrinks -> 0
+                    costModel.approximatelyEqual(a.branchingFactor, b.branchingFactor) -> 0
+                    else -> a.branchingFactor.compareTo(b.branchingFactor)
+                }
+            }.then(legacy).thenBy { it.targetName }
+        }
+
+        /**
+         * Estimates the factor by which covering [name] multiplies the number of partial
+         * matches.
+         *
+         * The estimate starts from the raw access cost of the step ([baseFactor] — a scan's
+         * filtered class size, or a walk's average fan-out) and then applies the selectivity
+         * of every constraint that becomes checkable *because of* this coverage:
+         *
+         * - **Cycle closure.** Any other pattern link whose two endpoints are both covered
+         *   after this step becomes a `where(...)` edge check.  Its selectivity is the
+         *   probability that an arbitrary vertex pair carries such an edge, which is tiny
+         *   for any realistic model — this is why a step that closes a cycle beats a step
+         *   with the same fan-out that does not.
+         * - **Attribute predicates.** Deferred property constraints and where-clauses whose
+         *   dependencies are all covered after this step, scored with the System R defaults.
+         *
+         * Application conditions are deliberately *not* folded in here; they keep their own
+         * ordering criterion ([minConditionCostUnlockedBy]) as a tie-breaker, because their
+         * benefit is not a selectivity but the point in the plan at which they can run.
+         *
+         * @param costModel The model-sensitive cost model.
+         * @param name The instance name that this candidate covers.
+         * @param baseFactor The candidate's raw access factor.
+         * @param covered Instance names covered before this step.
+         * @param coveringLink The link consumed by a walk candidate, excluded from the cycle
+         *        closure scan; `null` for a scan candidate.
+         * @return The estimated branching factor, `0.0` when the step cannot produce any
+         *         partial match at all.
+         */
+        private fun estimateBranchingFactor(
+            costModel: MatchCostModel,
+            name: String,
+            baseFactor: Double,
+            covered: Set<String>,
+            coveringLink: TypedPatternLinkElement?
+        ): Double {
+            if (baseFactor == 0.0) return 0.0
+            var factor = baseFactor
+
+            // "Covered after this step" is `covered + name`, tested without materialising the
+            // union: this runs for every candidate of every step of every match.
+            fun coveredAfter(other: String) = other == name || other in covered
+
+            for (link in graph.links) {
+                if (link === coveringLink) continue
+                val srcName = link.link.source.objectName
+                val tgtName = link.link.target.objectName
+                if (!coveredAfter(srcName) || !coveredAfter(tgtName)) continue
+                if (srcName in covered && tgtName in covered) continue
+                factor *= costModel.linkCheckSelectivity(link)
+                if (factor == 0.0) return 0.0
             }
 
-            for (k in structural.indices) {
-                val step = structural[k] as? StructuralStep.CoverByWalk ?: continue
-                val fromName = step.fromName
-                val toName = step.toName
-                val link = step.link
+            for ((dependencies, selectivity) in deferredPredicates) {
+                if (!dependencies.all { coveredAfter(it) }) continue
+                if (covered.containsAll(dependencies)) continue
+                factor *= selectivity
+            }
+            return factor
+        }
 
-                // Find the association for this link
-                val assoc = assocByProps[
-                    link.link.source.propertyName to link.link.target.propertyName
-                ] ?: continue
+        /**
+         * Every predicate in the pattern that cannot be inlined the moment its owning
+         * instance is covered, paired with its estimated selectivity.
+         *
+         * Two kinds contribute:
+         * - **Deferred property constraints** — `x.p OP expr` where `expr` references other
+         *   pattern nodes.  Its dependencies are `{x}` plus the instances `expr` reads.
+         * - **Where clauses** — dependencies are the instances the expression reads.
+         *
+         * Dependency sets are restricted to *matchable* names: referenced context instances
+         * are pre-bound and pattern variables are resolved to the instances they read
+         * through [MatchPlanGraph.resolveTransitiveNodeDeps], so neither ever blocks a
+         * predicate from being counted.
+         *
+         * Constant property filters are excluded — they are already priced into
+         * [MatchCostModel.scanFactor] and [MatchCostModel.walkFactor].
+         */
+        private val deferredPredicates: List<Pair<Set<String>, Double>> by lazy {
+            val costModel = graph.costModel ?: return@lazy emptyList()
+            val result = mutableListOf<Pair<Set<String>, Double>>()
 
-                // Check whether toName is at the 1-side of the association
-                val toIsOneSide = if (!step.isReversed) {
-                    assoc.target.multiplicity.upper == 1
-                } else {
-                    assoc.source.multiplicity.upper == 1
+            for (instance in graph.instances) {
+                val owner = instance.objectInstance.name
+                for (property in instance.objectInstance.properties) {
+                    if (property.operator == "=") continue
+                    val referenced = graph.nodeAnalyzer.findReferencedNodes(property.value)
+                    if (referenced.isEmpty() && !graph.isCollectionExpression(property.value)) continue
+                    val dependencies = matchableDependencies(referenced) + owner
+                    result.add(dependencies to costModel.operatorSelectivity(property.operator))
                 }
-                if (!toIsOneSide) continue
+            }
 
-                // Find the unconditional VertexScan for fromName strictly before k
-                val scanIdx = (0 until k).indexOfFirst { i ->
-                    val s = structural[i]
-                    s is StructuralStep.CoverByVertex && s.name == fromName && s.vertexId == null
-                }
-                if (scanIdx < 0) continue
-
-                // Blocking check: another walk from fromName between the scan and this walk
-                val blocked = (scanIdx + 1 until k).any { i ->
-                    val s = structural[i]
-                    s is StructuralStep.CoverByWalk && s.fromName == fromName
-                }
-                if (blocked) continue
-
-                val safetyBlocked = graph.conditions.any { pending ->
-                    val required = graph.pendingConditionRequiredNodes(pending)
-                    fromName in required && toName !in required
-                }
-                if (safetyBlocked) continue
-
-                // Perform the swap
-                structural[scanIdx] = StructuralStep.CoverByVertex(
-                    name = toName,
-                    instance = graph.instanceMap[toName],
-                    vertexId = graph.getVertexId(toName)
-                )
-                structural[k] = StructuralStep.CoverByWalk(
-                    link = step.link,
-                    isReversed = !step.isReversed,
-                    fromName = toName,
-                    toName = fromName,
-                    toInstance = graph.instanceMap[fromName],
-                    toVertexId = graph.getVertexId(fromName),
-                    needsSelect = false
+            for (clause in graph.whereClauses) {
+                val referenced = graph.nodeAnalyzer.findReferencedNodes(clause.whereClause.expression)
+                result.add(
+                    matchableDependencies(referenced) to
+                        costModel.predicateSelectivity(clause.whereClause.expression)
                 )
             }
+            result
+        }
+
+        /**
+         * Resolves [referencedNodes] through pattern variables and keeps only the names that
+         * must be covered by the structural traversal.
+         */
+        private fun matchableDependencies(referencedNodes: Set<String>): Set<String> =
+            graph.resolveTransitiveNodeDeps(referencedNodes).filterTo(mutableSetOf()) {
+                it in graph.matchableNames
+            }
+
+        /** One-line rendering of [step] for [DEBUG_STRUCTURAL_ORDER_PROPERTY]. */
+        private fun describe(step: StructuralStep): String = when (step) {
+            is StructuralStep.CoverByVertex -> "scan ${step.name}"
+            is StructuralStep.CoverByWalk -> "walk ${step.fromName}->${step.toName}"
         }
 
         /**
@@ -437,8 +600,8 @@ internal class MatchPlanBuilder(
          * unlocked by the coverage event.
          *
          * [StructuralStep.CoverByWalk.needsSelect] is recomputed from [currentNode]
-         * rather than taken from the pre-computed field, because [applyPostReordering]
-         * may have changed the traversal flow.
+         * rather than taken from the pre-computed field, which the greedy loop fills in
+         * before the final traversal flow is known.
          *
          * @param structuralSteps The ordered structural steps to emit.
          */
@@ -652,7 +815,11 @@ internal class MatchPlanBuilder(
                 nodeDeps.forEach { resolve(it) }
                 val varDeps = graph.variableVarDeps[name] ?: emptySet()
                 varDeps.forEach { resolve(it) }
-                baseSteps.add(BaseStep.VariableBinding(varEl, VariableBinding.variableLabel(name)))
+                baseSteps.add(BaseStep.VariableBinding(
+                    varEl,
+                    VariableBinding.variableLabel(name),
+                    isReassignment = name in graph.reassignedNames
+                ))
                 emittedVariables.add(name)
                 pendingVariables.remove(varEl)
                 currentNode = null
@@ -696,14 +863,15 @@ internal class MatchPlanBuilder(
          * covered instances.  They are revisited by [tryInlineDeferredProperties] after
          * every new coverage event.
          *
-         * Only `==` (equality) properties are handled; properties with other operators
-         * are silently ignored.
+         * All comparison operators (`==`, `!=`, `<`, `>`, `<=`, `>=`) produce inline
+         * or deferred constraints.  The assignment operator (`=`) is skipped — it is
+         * handled by [GraphModificationApplier], not by the match plan.
          *
          * @param instance The instance element whose properties are to be processed.
          */
         private fun addInlinePropertyConstraints(instance: TypedPatternObjectInstanceElement) {
             for (property in instance.objectInstance.properties) {
-                if (property.operator != "==") continue
+                if (property.operator == "=") continue
                 val referencedNodes = graph.nodeAnalyzer.findReferencedNodes(property.value)
                 val referencedVars = referencedNodes.filter { it in graph.variableNames }
                 val isConstant = referencedNodes.isEmpty() && !graph.isCollectionExpression(property.value)
@@ -880,9 +1048,11 @@ internal class MatchPlanBuilder(
          * Returns the inline property constraint steps for [instance] inside an
          * application condition.
          *
-         * Only `==` properties are included.  The
-         * [BaseStep.InlinePropertyConstraint.isConstant] flag is determined the same way
-         * as in [addInlinePropertyConstraints].  Variable-referencing and collection
+         * All comparison operators (`==`, `!=`, `<`, `>`, `<=`, `>=`) are included.
+         * The assignment operator (`=`) is skipped — it is handled by the modification
+         * applier, not by the match plan.
+         * The [BaseStep.InlinePropertyConstraint.isConstant] flag is determined the same
+         * way as in [addInlinePropertyConstraints].  Variable-referencing and collection
          * expressions are included unconditionally because they are emitted inside a
          * `where(...)` block where the outer traversal state is already fixed.
          *
@@ -892,7 +1062,7 @@ internal class MatchPlanBuilder(
         private fun buildConditionPropertySteps(
             instance: TypedPatternObjectInstanceElement
         ): List<BaseStep.InlinePropertyConstraint> = instance.objectInstance.properties.mapNotNull { property ->
-            if (property.operator != "==") return@mapNotNull null
+            if (property.operator == "=") return@mapNotNull null
             val referencedNodes = graph.nodeAnalyzer.findReferencedNodes(property.value)
             val isConstant = referencedNodes.isEmpty() && !graph.isCollectionExpression(property.value)
             BaseStep.InlinePropertyConstraint(instance.objectInstance.name, instance.objectInstance.className, property, isConstant)

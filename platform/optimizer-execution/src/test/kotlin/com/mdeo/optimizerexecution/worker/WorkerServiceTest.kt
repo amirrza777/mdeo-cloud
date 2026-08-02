@@ -253,7 +253,7 @@ class WorkerServiceTest {
      * Verifies that when a subprocess times out during mutation in local-channel mode and
      * sends a [com.mdeo.optimizer.worker.WorkerShutdownNotice] over the WebSocket,
      * [WorkerClient.executeNodeBatch] throws [WorkerShutdownException] promptly — not after
-     * the 600-second [WorkerClient.OPERATION_TIMEOUT_MS].
+     * the batch timeout the work in it would allow.
      *
      * The @Timeout(30) guard catches any regression where pending requests are not drained
      * on [WorkerShutdownNotice], forcing callers to wait for the full operation timeout.

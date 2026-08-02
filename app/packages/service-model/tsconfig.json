@@ -21,7 +21,7 @@
             "path": "../service-common"
         },
         {
-            "path": "../language-model-csv"
+            "path": "../service-model-common"
         }
     ],
     "include": [

@@ -21,6 +21,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import org.junit.jupiter.api.Nested
 
@@ -220,6 +221,17 @@ class MutationRuleGeneratorTest {
         }
 
         @Test
+        fun `REMOVE action on Room windows produces REMOVE repair type`() {
+            val spec = MutationRuleSpec("Room", edge = "windows", action = MutationAction.REMOVE)
+            val result = generator.getRepairsForRuleSpec(spec, info)
+
+            val removeSpecs = result["REMOVE"] ?: emptyList()
+            assertEquals(1, removeSpecs.size)
+            assertEquals(RepairSpecType.REMOVE, removeSpecs.first().type)
+            assertEquals("windows", removeSpecs.first().edgeName)
+        }
+
+        @Test
         fun `reference with lower=1 upper=3 and bounded opposite produces CREATE_LB_REPAIR`() {
             // Build a local metamodel with a reference that has lower!=upper and bounded opposite
             val garageClass = ClassData(name = "Garage", isAbstract = false)
@@ -409,19 +421,18 @@ class MutationRuleGeneratorTest {
         }
 
         @Test
-        fun `DELETE rule produces match then delete elements`() {
+        fun `DELETE rule produces single merged delete element`() {
             val spec = RepairSpec("Room", null, RepairSpecType.DELETE)
             val ast = MutationAstBuilder.build("DELETE_Room", spec, mmPath, info)
 
             assertNotNull(ast)
             val stmt = ast.statements[0] as TypedMatchStatement
             val instances = stmt.pattern.elements.filterIsInstance<TypedPatternObjectInstanceElement>()
-            val matchable = instances.filter { it.objectInstance.modifier == null }
-            val deleted   = instances.filter { it.objectInstance.modifier == "delete" }
-            assertEquals(1, matchable.size,  "Expected one matchable instance")
+            val matchable = instances.filter { it.objectInstance.modifier == null && it.objectInstance.name == "node" }
+            val deleted   = instances.filter { it.objectInstance.modifier == "delete" && it.objectInstance.name == "node" }
+            assertEquals(0, matchable.size,  "Expected no separate match-only instance for node")
             assertEquals(1, deleted.size,    "Expected one delete instance")
-            assertEquals("Room", matchable[0].objectInstance.className)
-            assertEquals(null, deleted[0].objectInstance.className)
+            assertEquals("Room", deleted[0].objectInstance.className)
         }
     }
 
@@ -536,8 +547,9 @@ class MutationRuleGeneratorTest {
                 assertTrue(m.typedAst.statements.isNotEmpty(), "Rule '${m.name}' has no statements")
                 val stmt = m.typedAst.statements[0] as TypedMatchStatement
                 val links = stmt.pattern.elements.filterIsInstance<TypedPatternLinkElement>()
-                val linkRef = links.first().link.source.propertyName
-                assertEquals("house", linkRef, "Link should use the 'house' reference name")
+                val link = links.first().link
+                assertEquals("rooms", link.source.propertyName, "Link source should use canonical source-end property")
+                assertEquals("house", link.target.propertyName, "Link target should use canonical target-end property")
             }
         }
     }
@@ -1207,6 +1219,7 @@ class MutationRuleGeneratorTest {
             assertNotNull(nodeObj, "Expected a match element for node: Room")
             val deleteMarker = objects.find { it.objectInstance.name == "node" && it.objectInstance.modifier == "delete" }
             assertNotNull(deleteMarker, "Expected a delete marker for node")
+            assertEquals("Room", deleteMarker.objectInstance.className, "Delete marker should carry className")
         }
 
         @Test
@@ -1356,6 +1369,827 @@ class MutationRuleGeneratorTest {
             val links = stmt.pattern.elements.filterIsInstance<TypedPatternLinkElement>()
             val guardLinks = links.filter { it.link.modifier == null }
             assertEquals(2, guardLinks.size, "Expected two guard link match elements")
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // Link direction correctness for forward vs. reverse references
+    // -------------------------------------------------------------------------
+
+    /**
+     * Tests that generated TypedPatternLinks always carry both property names
+     * (source end and target end of the metamodel association) and that the link is
+     * always emitted in the canonical metamodel direction regardless of whether
+     * the MutationRuleSpec names the forward or the reverse end.
+     *
+     * The reference association used throughout this suite is:
+     *   Item.knapsack <--> Knapsack.items [0..*]
+     * stored as assoc.source = Item/knapsack and assoc.target = Knapsack/items.
+     *
+     * Bug: MutationAstBuilder previously always set target.propertyName = null,
+     * producing an edge label that never matched any graph edge.
+     */
+    @Nested
+    inner class LinkDirectionTests {
+
+        private val knapsackClass = ClassData(name = "Knapsack", isAbstract = false)
+        private val itemClass     = ClassData(name = "Item",     isAbstract = false)
+
+        private val itemKnapsackAssoc = AssociationData(
+            source   = AssociationEndData("Item",     "knapsack", MultiplicityData(lower = 1, upper = 1)),
+            operator = "<-->",
+            target   = AssociationEndData("Knapsack", "items",    MultiplicityData(lower = 0, upper = -1))
+        )
+
+        private val knapsackMeta = MetamodelData(
+            path         = "/project/knapsack.mm",
+            classes      = listOf(knapsackClass, itemClass),
+            associations = listOf(itemKnapsackAssoc)
+        )
+
+        private val info   = MetamodelInfo(knapsackMeta)
+        private val mmPath = "/project/knapsack.mm"
+
+        private fun linksOf(spec: RepairSpec): List<TypedPatternLinkElement> {
+            val ast  = MutationAstBuilder.build(spec.edgeName ?: "rule", spec, mmPath, info)
+            val stmt = ast.statements[0] as TypedMatchStatement
+            return stmt.pattern.elements.filterIsInstance<TypedPatternLinkElement>()
+        }
+
+        @Test
+        fun `forward ref Item knapsack links have both property names set`() {
+            val links = linksOf(RepairSpec("Item", "knapsack", RepairSpecType.CHANGE))
+            assertTrue(links.isNotEmpty())
+            for (link in links) {
+                assertNotNull(link.link.source.propertyName, "source.propertyName null (modifier=${link.link.modifier})")
+                assertNotNull(link.link.target.propertyName, "target.propertyName null (modifier=${link.link.modifier})")
+            }
+        }
+
+        @Test
+        fun `reverse ref Knapsack items links have both property names set`() {
+            val links = linksOf(RepairSpec("Knapsack", "items", RepairSpecType.ADD))
+            assertTrue(links.isNotEmpty())
+            for (link in links) {
+                assertNotNull(link.link.source.propertyName, "source.propertyName null (modifier=${link.link.modifier})")
+                assertNotNull(link.link.target.propertyName, "target.propertyName null (modifier=${link.link.modifier})")
+            }
+        }
+
+        @Test
+        fun `forward ref Item knapsack links use canonical association direction`() {
+            val links = linksOf(RepairSpec("Item", "knapsack", RepairSpecType.CHANGE))
+            for (link in links) {
+                assertEquals("knapsack", link.link.source.propertyName, "Forward: source must be 'knapsack'")
+                assertEquals("items",    link.link.target.propertyName, "Forward: target must be 'items'")
+            }
+        }
+
+        @Test
+        fun `reverse ref Knapsack items links use canonical association direction`() {
+            val links = linksOf(RepairSpec("Knapsack", "items", RepairSpecType.ADD))
+            for (link in links) {
+                assertEquals("knapsack", link.link.source.propertyName, "Reverse: source must be canonical 'knapsack'")
+                assertEquals("items",    link.link.target.propertyName, "Reverse: target must be canonical 'items'")
+            }
+        }
+
+        @Test
+        fun `reverse ref Knapsack items links map objects to canonical direction`() {
+            val links = linksOf(RepairSpec("Knapsack", "items", RepairSpecType.ADD))
+            for (link in links) {
+                assertEquals("target", link.link.source.objectName, "Reverse: canonical source object should be target (Item)")
+                assertEquals("source", link.link.target.objectName, "Reverse: canonical target object should be source (Knapsack)")
+                assertEquals("knapsack", link.link.source.propertyName)
+                assertEquals("items", link.link.target.propertyName)
+            }
+        }
+
+        @Test
+        fun `link property orientation is independent of chosen endpoint`() {
+            val forwardPairs = linksOf(RepairSpec("Item", "knapsack", RepairSpecType.REMOVE))
+                .map { it.link.source.propertyName to it.link.target.propertyName }
+                .toSet()
+            val reversePairs = linksOf(RepairSpec("Knapsack", "items", RepairSpecType.REMOVE))
+                .map { it.link.source.propertyName to it.link.target.propertyName }
+                .toSet()
+
+            assertEquals(
+                setOf("knapsack" to "items"),
+                forwardPairs,
+                "Forward endpoint must still emit canonical (source,target) property pair"
+            )
+            assertEquals(
+                setOf("knapsack" to "items"),
+                reversePairs,
+                "Reverse endpoint must emit the same canonical (source,target) property pair"
+            )
+        }
+
+        @Test
+        fun `REMOVE forward ref Item knapsack links have both property names set`() {
+            val links = linksOf(RepairSpec("Item", "knapsack", RepairSpecType.REMOVE))
+            assertTrue(links.isNotEmpty())
+            for (link in links) {
+                assertNotNull(link.link.source.propertyName, "source.propertyName null (modifier=${link.link.modifier})")
+                assertNotNull(link.link.target.propertyName, "target.propertyName null (modifier=${link.link.modifier})")
+            }
+        }
+
+        @Test
+        fun `REMOVE reverse ref Knapsack items links have both property names set`() {
+            val links = linksOf(RepairSpec("Knapsack", "items", RepairSpecType.REMOVE))
+            assertTrue(links.isNotEmpty())
+            for (link in links) {
+                assertNotNull(link.link.source.propertyName, "source.propertyName null (modifier=${link.link.modifier})")
+                assertNotNull(link.link.target.propertyName, "target.propertyName null (modifier=${link.link.modifier})")
+            }
+        }
+    }
+}
+
+// ============================================================================
+// New CPO variant tests (CREATE_LB_REPAIR_MULTI, DELETE_REPAIR_SINGLE/MULTI)
+// ============================================================================
+
+/**
+ * Metamodel for multi-donor / delete-repair tests:
+ *
+ *   ClassA  -->  ClassB  (A.roles  2..4, B.members 0..2)
+ *   Worker  -->  Project (W.project 0..*, P.worker  1..1)
+ *   Team    -->  Player  (T.members 0..*, P.teams   2..2)
+ */
+class NewCpoVariantTests {
+
+    private val classAData = ClassData(name = "ClassA", isAbstract = false)
+    private val classBData = ClassData(name = "ClassB", isAbstract = false)
+
+    /** A.roles 2..4 → B.members 0..2  (lower=2 → multi-donor CREATE repair) */
+    private val rolesAssoc = AssociationData(
+        source = AssociationEndData("ClassA", "roles",   MultiplicityData(lower = 2, upper = 4)),
+        operator = "-->",
+        target  = AssociationEndData("ClassB", "members", MultiplicityData(lower = 0, upper = 2))
+    )
+    private val metaAB = MetamodelData(
+        path = "/t/ab.mm",
+        classes = listOf(classAData, classBData),
+        associations = listOf(rolesAssoc)
+    )
+
+    private val workerClass  = ClassData(name = "Worker",  isAbstract = false)
+    private val projectClass = ClassData(name = "Project", isAbstract = false)
+    private val workerProjectAssoc = AssociationData(
+        source = AssociationEndData("Worker",  "project", MultiplicityData(lower = 0, upper = -1)),
+        operator = "-->",
+        target  = AssociationEndData("Project", "worker",  MultiplicityData(lower = 1, upper = 1))
+    )
+    private val metaWP = MetamodelData(
+        path = "/t/wp.mm",
+        classes = listOf(workerClass, projectClass),
+        associations = listOf(workerProjectAssoc)
+    )
+
+    private val teamClass   = ClassData(name = "Team",   isAbstract = false)
+    private val playerClass = ClassData(name = "Player", isAbstract = false)
+    private val teamPlayerAssoc = AssociationData(
+        source = AssociationEndData("Team",   "members", MultiplicityData(lower = 0, upper = -1)),
+        operator = "-->",
+        target  = AssociationEndData("Player", "teams",   MultiplicityData(lower = 2, upper = 2))
+    )
+    private val metaTP = MetamodelData(
+        path = "/t/tp.mm",
+        classes = listOf(teamClass, playerClass),
+        associations = listOf(teamPlayerAssoc)
+    )
+
+    private val fixedWorkerClass  = ClassData(name = "FixedWorker",  isAbstract = false)
+    private val fixedProjectClass = ClassData(name = "FixedProject", isAbstract = false)
+    private val fixedWorkerProjectAssoc = AssociationData(
+        source = AssociationEndData("FixedWorker",  "project", MultiplicityData(lower = 1, upper = 1)),
+        operator = "-->",
+        target  = AssociationEndData("FixedProject", "worker",  MultiplicityData(lower = 1, upper = 1))
+    )
+    private val metaFixedWP = MetamodelData(
+        path = "/t/fixed-wp.mm",
+        classes = listOf(fixedWorkerClass, fixedProjectClass),
+        associations = listOf(fixedWorkerProjectAssoc)
+    )
+
+    private val managerClass = ClassData(name = "Manager", isAbstract = false)
+    private val project2Class = ClassData(name = "Project2", isAbstract = false)
+    private val task2Class = ClassData(name = "Task2", isAbstract = false)
+    private val managerProjectAssoc = AssociationData(
+        source = AssociationEndData("Manager", "projects", MultiplicityData(lower = 0, upper = -1)),
+        operator = "-->",
+        target  = AssociationEndData("Project2", "manager", MultiplicityData(lower = 1, upper = 1))
+    )
+    private val managerTaskAssoc = AssociationData(
+        source = AssociationEndData("Manager", "tasks", MultiplicityData(lower = 0, upper = -1)),
+        operator = "-->",
+        target  = AssociationEndData("Task2", "manager", MultiplicityData(lower = 1, upper = -1))
+    )
+    private val metaManager = MetamodelData(
+        path = "/t/manager.mm",
+        classes = listOf(managerClass, project2Class, task2Class),
+        associations = listOf(managerProjectAssoc, managerTaskAssoc)
+    )
+
+    @Nested
+    inner class NewSpecsGeneratorTests {
+
+        private val generator = SpecsGenerator()
+
+        @Test
+        fun `CREATE with lower=2 and bounded opposite emits both LB_REPAIR and LB_REPAIR_MULTI`() {
+            val infoAB = MetamodelInfo(metaAB)
+            val spec = MutationRuleSpec("ClassA", edge = "roles", action = MutationAction.CREATE)
+            val result = generator.getRepairsForRuleSpec(spec, infoAB)
+            val types = result["CREATE"]!!.map { it.type }.toSet()
+            assertTrue(types.contains(RepairSpecType.CREATE_LB_REPAIR),       "Expected CREATE_LB_REPAIR")
+            assertTrue(types.contains(RepairSpecType.CREATE_LB_REPAIR_MULTI), "Expected CREATE_LB_REPAIR_MULTI")
+        }
+
+        @Test
+        fun `CREATE with lower=1 emits LB_REPAIR but NOT LB_REPAIR_MULTI`() {
+            val garageClass = ClassData(name = "Garage2", isAbstract = false)
+            val houseClass  = ClassData(name = "House9",  isAbstract = false)
+            val assoc = AssociationData(
+                source = AssociationEndData("House9",  "garages", MultiplicityData(lower = 1, upper = 3)),
+                operator = "-->",
+                target  = AssociationEndData("Garage2", "owner",   MultiplicityData(lower = 0, upper = 2))
+            )
+            val meta = MetamodelData(path = "/t/g9.mm", classes = listOf(houseClass, garageClass), associations = listOf(assoc))
+            val info = MetamodelInfo(meta)
+            val spec = MutationRuleSpec("House9", edge = "garages", action = MutationAction.CREATE)
+            val result = generator.getRepairsForRuleSpec(spec, info)
+            val types = result["CREATE"]!!.map { it.type }.toSet()
+            assertTrue(types.contains(RepairSpecType.CREATE_LB_REPAIR),           "Expected CREATE_LB_REPAIR for lower=1")
+            assertFalse(types.contains(RepairSpecType.CREATE_LB_REPAIR_MULTI),     "Expected NO MULTI for lower=1")
+        }
+
+        @Test
+        fun `DELETE on class with k=l=1 back-ref emits DELETE_REPAIR_SINGLE but not MULTI`() {
+            val infoWP = MetamodelInfo(metaWP)
+            val spec = MutationRuleSpec("Worker", action = MutationAction.DELETE)
+            val result = generator.getRepairsForRuleSpec(spec, infoWP)
+            val types = result["DELETE"]!!.map { it.type }.toSet()
+            assertTrue(types.contains(RepairSpecType.DELETE),               "Expected plain DELETE")
+            assertTrue(types.contains(RepairSpecType.DELETE_REPAIR_SINGLE), "Expected DELETE_REPAIR_SINGLE for k=l=1")
+            assertFalse(types.contains(RepairSpecType.DELETE_REPAIR_MULTI), "Expected NO DELETE_REPAIR_MULTI for k=l=1")
+        }
+
+        @Test
+        fun `DELETE on class with k=l=2 back-ref emits both DELETE_REPAIR_SINGLE and DELETE_REPAIR_MULTI`() {
+            val infoTP = MetamodelInfo(metaTP)
+            val spec = MutationRuleSpec("Team", action = MutationAction.DELETE)
+            val result = generator.getRepairsForRuleSpec(spec, infoTP)
+            val types = result["DELETE"]!!.map { it.type }.toSet()
+            assertTrue(types.contains(RepairSpecType.DELETE),               "Expected plain DELETE")
+            assertTrue(types.contains(RepairSpecType.DELETE_REPAIR_SINGLE), "Expected DELETE_REPAIR_SINGLE for k=l=2")
+            assertTrue(types.contains(RepairSpecType.DELETE_REPAIR_MULTI),  "Expected DELETE_REPAIR_MULTI for k=l=2")
+        }
+
+        @Test
+        fun `DELETE on class with fixed source and fixed back-ref emits only plain DELETE`() {
+            val infoFixedWP = MetamodelInfo(metaFixedWP)
+            val spec = MutationRuleSpec("FixedWorker", action = MutationAction.DELETE)
+            val result = generator.getRepairsForRuleSpec(spec, infoFixedWP)
+            val types = result["DELETE"]!!.map { it.type }.toSet()
+            assertEquals(setOf(RepairSpecType.DELETE), types,
+                "Expected fixed-source delete to suppress repair variants")
+        }
+
+        @Test
+        fun `DELETE on class with soft lower-bound (k=1, l unbounded) emits only plain DELETE`() {
+            val assignClass = ClassData(name = "AssignX", isAbstract = false)
+            val taskClass   = ClassData(name = "TaskX",   isAbstract = false)
+            val assoc = AssociationData(
+                source = AssociationEndData("AssignX", "task",        MultiplicityData(lower = 0, upper = -1)),
+                operator = "-->",
+                target  = AssociationEndData("TaskX",  "assignments", MultiplicityData(lower = 1, upper = -1))
+            )
+            val meta = MetamodelData(path = "/t/atx.mm", classes = listOf(assignClass, taskClass), associations = listOf(assoc))
+            val info = MetamodelInfo(meta)
+            val spec = MutationRuleSpec("AssignX", action = MutationAction.DELETE)
+            val result = generator.getRepairsForRuleSpec(spec, info)
+            val types = result["DELETE"]!!.map { it.type }.toSet()
+            assertTrue(types.contains(RepairSpecType.DELETE),                "Expected plain DELETE")
+            assertFalse(types.contains(RepairSpecType.DELETE_REPAIR_SINGLE), "Expected NO repair for soft lower-bound")
+            assertFalse(types.contains(RepairSpecType.DELETE_REPAIR_MULTI),  "Expected NO repair for soft lower-bound")
+        }
+
+        @Test
+        fun `DELETE on class with no back-ref produces only plain DELETE`() {
+            // ClassA.roles is unidirectional (no back-ref from ClassB)
+            val classBOnly = ClassData(name = "ClassBOnly", isAbstract = false)
+            val classAOnly = ClassData(name = "ClassAOnly", isAbstract = false)
+            val assoc = AssociationData(
+                source = AssociationEndData("ClassAOnly", "things", MultiplicityData(lower = 0, upper = -1)),
+                operator = "-->",
+                target  = AssociationEndData("ClassBOnly", null,     MultiplicityData(lower = 0, upper = -1))
+            )
+            val meta = MetamodelData(path = "/t/unidirx.mm", classes = listOf(classAOnly, classBOnly), associations = listOf(assoc))
+            val info = MetamodelInfo(meta)
+            val spec = MutationRuleSpec("ClassAOnly", action = MutationAction.DELETE)
+            val result = generator.getRepairsForRuleSpec(spec, info)
+            val types = result["DELETE"]!!.map { it.type }.toSet()
+            assertEquals(setOf(RepairSpecType.DELETE), types, "Expected only plain DELETE for unidirectional ref")
+        }
+    }
+
+    @Nested
+    inner class NewAstBuilderTests {
+
+        @Test
+        fun `CREATE_LB_REPAIR_MULTI with lower=2 produces 2 donors, 2 targets, newNode, 2 delete+2 create links, 2 guards`() {
+            val info = MetamodelInfo(metaAB)
+            val spec = RepairSpec("ClassA", "roles", RepairSpecType.CREATE_LB_REPAIR_MULTI)
+            val ast  = MutationAstBuilder.build("name", spec, "/t/ab.mm", info)
+            val stmt = ast.statements[0] as TypedMatchStatement
+
+            val objects = stmt.pattern.elements.filterIsInstance<TypedPatternObjectInstanceElement>()
+            assertEquals(5, objects.size, "Expected 5 objects: donor_1, donor_2, target_1, target_2, newNode")
+            assertEquals(2, objects.count { it.objectInstance.name.startsWith("donor_") },  "Expected 2 donors")
+            assertEquals(2, objects.count { it.objectInstance.name.startsWith("target_") }, "Expected 2 targets")
+            assertEquals(1, objects.count { it.objectInstance.modifier == "create" },       "Expected 1 created node")
+
+            val links = stmt.pattern.elements.filterIsInstance<TypedPatternLinkElement>()
+            assertEquals(6, links.size, "Expected 6 links: 2 match + 2 delete + 2 create")
+            assertEquals(2, links.count { it.link.modifier == null },     "Expected 2 match links")
+            assertEquals(2, links.count { it.link.modifier == "delete" }, "Expected 2 delete links")
+            assertEquals(2, links.count { it.link.modifier == "create" }, "Expected 2 create links")
+
+            val wheres = stmt.pattern.elements.filterIsInstance<TypedPatternWhereClauseElement>()
+            assertEquals(2, wheres.size, "Expected 2 lower-bound guards")
+            wheres.forEach { w ->
+                val expr = w.whereClause.expression as TypedBinaryExpression
+                assertEquals(">", expr.operator)
+                assertEquals("2", (expr.right as TypedIntLiteralExpression).value)
+            }
+        }
+
+        @Test
+        fun `CREATE_LB_REPAIR_MULTI donor and target variable names are indexed`() {
+            val info = MetamodelInfo(metaAB)
+            val spec = RepairSpec("ClassA", "roles", RepairSpecType.CREATE_LB_REPAIR_MULTI)
+            val ast  = MutationAstBuilder.build("name", spec, "/t/ab.mm", info)
+            val stmt = ast.statements[0] as TypedMatchStatement
+            val names = stmt.pattern.elements
+                .filterIsInstance<TypedPatternObjectInstanceElement>()
+                .map { it.objectInstance.name }.toSet()
+            assertTrue(names.contains("donor_1"))
+            assertTrue(names.contains("donor_2"))
+            assertTrue(names.contains("target_1"))
+            assertTrue(names.contains("target_2"))
+            assertTrue(names.contains("newNode"))
+        }
+
+        @Test
+        fun `DELETE_REPAIR_SINGLE has merged delete node, neighbour match, other match, forbid and create links`() {
+            val info = MetamodelInfo(metaWP)
+            val spec = RepairSpec("Worker", "project", RepairSpecType.DELETE_REPAIR_SINGLE)
+            val ast  = MutationAstBuilder.build("name", spec, "/t/wp.mm", info)
+            val stmt = ast.statements[0] as TypedMatchStatement
+
+            val objects = stmt.pattern.elements.filterIsInstance<TypedPatternObjectInstanceElement>()
+            val deleteMarker  = objects.find { it.objectInstance.modifier == "delete" }
+            val neighborMatch = objects.find { it.objectInstance.name == "neighbor_project" }
+            val otherMatch    = objects.find { it.objectInstance.name == "other_project" }
+
+            assertNotNull(deleteMarker, "Expected delete marker")
+            assertEquals("Worker", deleteMarker.objectInstance.className, "Delete marker must carry className")
+            assertNotNull(neighborMatch, "Expected neighbour match object")
+            assertEquals("Project", neighborMatch.objectInstance.className)
+            assertNotNull(otherMatch, "Expected other_project match object")
+            assertEquals("Worker", otherMatch.objectInstance.className)
+
+            val links = stmt.pattern.elements.filterIsInstance<TypedPatternLinkElement>()
+            val modifiers = links.map { it.link.modifier }.toSet()
+            assertTrue(modifiers.contains(null),      "Expected match link (node→neighbour)")
+            assertTrue(modifiers.contains("forbid"),  "Expected forbid NAC link")
+            assertTrue(modifiers.contains("create"),  "Expected create link")
+            assertFalse(modifiers.contains("delete"), "DELETE_REPAIR_SINGLE must not have explicit delete link")
+        }
+
+        @Test
+        fun `DELETE_REPAIR_SINGLE with unbounded ref has no where clause`() {
+            val info = MetamodelInfo(metaWP)
+            val spec = RepairSpec("Worker", "project", RepairSpecType.DELETE_REPAIR_SINGLE)
+            val ast  = MutationAstBuilder.build("name", spec, "/t/wp.mm", info)
+            val stmt = ast.statements[0] as TypedMatchStatement
+            val wheres = stmt.pattern.elements.filterIsInstance<TypedPatternWhereClauseElement>()
+            assertTrue(wheres.isEmpty(), "Expected no where clause when ref upper=-1")
+        }
+
+        @Test
+        fun `DELETE_REPAIR_SINGLE with bounded ref emits upper-bound guard on other`() {
+            val w3Class = ClassData(name = "Worker3",  isAbstract = false)
+            val p3Class = ClassData(name = "Project3", isAbstract = false)
+            val assoc = AssociationData(
+                source = AssociationEndData("Worker3",  "project", MultiplicityData(lower = 0, upper = 3)),
+                operator = "-->",
+                target  = AssociationEndData("Project3", "worker",  MultiplicityData(lower = 1, upper = 1))
+            )
+            val meta = MetamodelData(path = "/t/w3p3.mm", classes = listOf(w3Class, p3Class), associations = listOf(assoc))
+            val info = MetamodelInfo(meta)
+            val spec = RepairSpec("Worker3", "project", RepairSpecType.DELETE_REPAIR_SINGLE)
+            val ast  = MutationAstBuilder.build("name", spec, "/t/w3p3.mm", info)
+            val stmt = ast.statements[0] as TypedMatchStatement
+            val wheres = stmt.pattern.elements.filterIsInstance<TypedPatternWhereClauseElement>()
+            assertEquals(1, wheres.size, "Expected one upper-bound guard")
+            val expr = wheres[0].whereClause.expression as TypedBinaryExpression
+            assertEquals("<", expr.operator)
+            val ident = ((expr.left as TypedMemberCallExpression).expression as TypedMemberAccessExpression)
+                .expression as TypedIdentifierExpression
+            assertEquals("other_project", ident.name)
+            assertEquals("3", (expr.right as TypedIntLiteralExpression).value)
+        }
+
+        @Test
+        fun `DELETE_REPAIR_SINGLE preserves lower-bound guards for non-repaired references`() {
+            val info = MetamodelInfo(metaManager)
+            val spec = RepairSpec("Manager", "projects", RepairSpecType.DELETE_REPAIR_SINGLE)
+            val ast = MutationAstBuilder.build("name", spec, "/t/manager.mm", info)
+            val stmt = ast.statements[0] as TypedMatchStatement
+
+            val objects = stmt.pattern.elements.filterIsInstance<TypedPatternObjectInstanceElement>()
+            val names = objects.map { it.objectInstance.name }.toSet()
+            assertTrue(names.contains("neighbor_projects"), "Expected repaired neighbour match")
+            assertTrue(names.contains("other_projects"), "Expected replacement source match")
+            assertTrue(names.contains("neighbor_tasks"), "Expected guard neighbour for non-repaired tasks ref")
+
+            val links = stmt.pattern.elements.filterIsInstance<TypedPatternLinkElement>()
+            assertTrue(
+                links.any {
+                    it.link.modifier == null &&
+                        it.link.source.objectName == "node" &&
+                        it.link.source.propertyName == "tasks" &&
+                        it.link.target.objectName == "neighbor_tasks"
+                },
+                "Expected match link for guarded non-repaired tasks ref"
+            )
+
+            val wheres = stmt.pattern.elements.filterIsInstance<TypedPatternWhereClauseElement>()
+            assertEquals(1, wheres.size, "Expected one lower-bound guard for non-repaired tasks ref")
+            val expr = wheres[0].whereClause.expression as TypedBinaryExpression
+            assertEquals(">", expr.operator)
+            val ident = ((expr.left as TypedMemberCallExpression).expression as TypedMemberAccessExpression)
+                .expression as TypedIdentifierExpression
+            assertEquals("neighbor_tasks", ident.name)
+            assertEquals("1", (expr.right as TypedIntLiteralExpression).value)
+        }
+
+        @Test
+        fun `DELETE_REPAIR_MULTI with k=2 produces 2 neighbours, 2 others, 2 forbid and 2 create links`() {
+            val info = MetamodelInfo(metaTP)
+            val spec = RepairSpec("Team", "members", RepairSpecType.DELETE_REPAIR_MULTI)
+            val ast  = MutationAstBuilder.build("name", spec, "/t/tp.mm", info)
+            val stmt = ast.statements[0] as TypedMatchStatement
+
+            val objects = stmt.pattern.elements.filterIsInstance<TypedPatternObjectInstanceElement>()
+            // node (match) + node (delete) + 2 neighbours + 2 others = 6
+            assertEquals(6, objects.size, "Expected 6 objects")
+            assertEquals(2, objects.count { it.objectInstance.name.startsWith("neighbor_members_") }, "Expected 2 neighbours")
+            assertEquals(2, objects.count { it.objectInstance.name.startsWith("other_members_") },    "Expected 2 others")
+
+            val links = stmt.pattern.elements.filterIsInstance<TypedPatternLinkElement>()
+            assertEquals(6, links.size, "Expected 6 links: 2 match + 2 forbid + 2 create")
+            assertEquals(2, links.count { it.link.modifier == null },     "Expected 2 match links")
+            assertEquals(2, links.count { it.link.modifier == "forbid" }, "Expected 2 forbid links")
+            assertEquals(2, links.count { it.link.modifier == "create" }, "Expected 2 create links")
+
+            val wheres = stmt.pattern.elements.filterIsInstance<TypedPatternWhereClauseElement>()
+            assertTrue(wheres.isEmpty(), "Expected no guards when ref upper=-1")
+        }
+
+        @Test
+        fun `DELETE_REPAIR_MULTI neighbour and other variable names are properly indexed`() {
+            val info = MetamodelInfo(metaTP)
+            val spec = RepairSpec("Team", "members", RepairSpecType.DELETE_REPAIR_MULTI)
+            val ast  = MutationAstBuilder.build("name", spec, "/t/tp.mm", info)
+            val stmt = ast.statements[0] as TypedMatchStatement
+            val names = stmt.pattern.elements
+                .filterIsInstance<TypedPatternObjectInstanceElement>()
+                .map { it.objectInstance.name }.toSet()
+            assertTrue(names.contains("neighbor_members_1"))
+            assertTrue(names.contains("neighbor_members_2"))
+            assertTrue(names.contains("other_members_1"))
+            assertTrue(names.contains("other_members_2"))
+        }
+    }
+
+    @Nested
+    inner class NewNamingTests {
+
+        @Test
+        fun `fromRepairSpec for CREATE_LB_REPAIR_MULTI has LBREPAIR_MULTI suffix`() {
+            val name = MutationRuleNameGenerator.fromRepairSpec(RepairSpec("Foo", "bar", RepairSpecType.CREATE_LB_REPAIR_MULTI))
+            assertTrue(name.endsWith("_LBREPAIR_MULTI"), "Expected LBREPAIR_MULTI suffix, got: $name")
+        }
+
+        @Test
+        fun `fromRepairSpec for DELETE_REPAIR_SINGLE has REPAIR_SG suffix`() {
+            val name = MutationRuleNameGenerator.fromRepairSpec(RepairSpec("Foo", "bar", RepairSpecType.DELETE_REPAIR_SINGLE))
+            assertTrue(name.endsWith("_REPAIR_SG"), "Expected REPAIR_SG suffix, got: $name")
+        }
+
+        @Test
+        fun `fromRepairSpec for DELETE_REPAIR_MULTI has REPAIR_MN suffix`() {
+            val name = MutationRuleNameGenerator.fromRepairSpec(RepairSpec("Foo", "bar", RepairSpecType.DELETE_REPAIR_MULTI))
+            assertTrue(name.endsWith("_REPAIR_MN"), "Expected REPAIR_MN suffix, got: $name")
+        }
+
+        @Test
+        fun `CREATE_LB_REPAIR_MULTI name contains className and refName`() {
+            val name = MutationRuleNameGenerator.fromRepairSpec(
+                RepairSpec("House", "garages", RepairSpecType.CREATE_LB_REPAIR_MULTI)
+            )
+            assertTrue(name.contains("House") && name.contains("garages"),
+                "Expected name to contain className and refName; got: $name")
+        }
+
+        @Test
+        fun `DELETE_REPAIR_SINGLE and MULTI names start with DELETE`() {
+            val sg = MutationRuleNameGenerator.fromRepairSpec(RepairSpec("Node", "edges", RepairSpecType.DELETE_REPAIR_SINGLE))
+            val mn = MutationRuleNameGenerator.fromRepairSpec(RepairSpec("Node", "edges", RepairSpecType.DELETE_REPAIR_MULTI))
+            assertTrue(sg.startsWith("DELETE"), "DELETE_REPAIR_SINGLE name must start with DELETE; got: $sg")
+            assertTrue(mn.startsWith("DELETE"), "DELETE_REPAIR_MULTI name must start with DELETE; got: $mn")
+        }
+    }
+
+    @Nested
+    inner class NewRuleGeneratorTests {
+
+        @Test
+        fun `generate with lower=2 ref produces both LB_REPAIR and LB_REPAIR_MULTI rules`() {
+            val specs = listOf(MutationRuleSpec("ClassA", edge = "roles", action = MutationAction.CREATE))
+            val names = MutationRuleGenerator.generate(metaAB, specs).map { it.name }.toSet()
+            assertTrue(names.any { it.contains("LBREPAIR") && !it.contains("MULTI") },
+                "Expected single-donor LBREPAIR rule; got: $names")
+            assertTrue(names.any { it.contains("LBREPAIR_MULTI") },
+                "Expected multi-donor LBREPAIR_MULTI rule; got: $names")
+        }
+
+        @Test
+        fun `generate DELETE for Worker produces REPAIR_SG but not REPAIR_MN (k=l=1)`() {
+            val names = MutationRuleGenerator.generate(
+                metaWP, listOf(MutationRuleSpec("Worker", action = MutationAction.DELETE))
+            ).map { it.name }.toSet()
+            assertTrue(names.any { it.contains("REPAIR_SG") }, "Expected REPAIR_SG; got: $names")
+            assertFalse(names.any { it.contains("REPAIR_MN") }, "Expected no REPAIR_MN for k=l=1; got: $names")
+        }
+
+        @Test
+        fun `generate DELETE for Team produces both REPAIR_SG and REPAIR_MN (k=l=2)`() {
+            val names = MutationRuleGenerator.generate(
+                metaTP, listOf(MutationRuleSpec("Team", action = MutationAction.DELETE))
+            ).map { it.name }.toSet()
+            assertTrue(names.any { it.contains("REPAIR_SG") }, "Expected REPAIR_SG; got: $names")
+            assertTrue(names.any { it.contains("REPAIR_MN") }, "Expected REPAIR_MN; got: $names")
+        }
+
+        @Test
+        fun `generate DELETE for fixed-source class suppresses repair variants`() {
+            val names = MutationRuleGenerator.generate(
+                metaFixedWP, listOf(MutationRuleSpec("FixedWorker", action = MutationAction.DELETE))
+            ).map { it.name }.toSet()
+            assertTrue(names.contains("DELETE_FixedWorker"), "Expected plain DELETE_FixedWorker; got: $names")
+            assertFalse(names.any { it.contains("REPAIR_SG") }, "Expected no REPAIR_SG for fixed source; got: $names")
+            assertFalse(names.any { it.contains("REPAIR_MN") }, "Expected no REPAIR_MN for fixed source; got: $names")
+        }
+
+        @Test
+        fun `all new variant rules have valid TypedAst with one statement`() {
+            val allMutations =
+                MutationRuleGenerator.generate(metaAB, listOf(MutationRuleSpec("ClassA", action = MutationAction.CREATE))) +
+                MutationRuleGenerator.generate(metaWP, listOf(MutationRuleSpec("Worker", action = MutationAction.DELETE))) +
+                MutationRuleGenerator.generate(metaTP, listOf(MutationRuleSpec("Team",   action = MutationAction.DELETE)))
+            allMutations.forEach { m ->
+                assertNotNull(m.typedAst, "Rule '${m.name}' has null typedAst")
+                assertEquals(1, m.typedAst.statements.size, "Rule '${m.name}' should have 1 statement")
+                assertTrue(m.typedAst.statements[0] is TypedMatchStatement,
+                    "Rule '${m.name}' statement should be TypedMatchStatement")
+            }
+        }
+
+        @Test
+        fun `generate ALL for Worker includes plain DELETE alongside repair variants`() {
+            val names = MutationRuleGenerator.generate(
+                metaWP, listOf(MutationRuleSpec("Worker", action = MutationAction.ALL))
+            ).map { it.name }.toSet()
+            assertTrue(names.contains("DELETE_Worker"), "Expected plain DELETE_Worker rule; got: $names")
+            assertTrue(names.any { it.contains("REPAIR_SG") }, "Expected REPAIR_SG rule; got: $names")
+        }
+
+        @Test
+        fun `generate deduplicates across base and S-pass for new variants`() {
+            val specs = listOf(MutationRuleSpec("ClassA", edge = "roles", action = MutationAction.CREATE))
+            val refinements = listOf(
+                com.mdeo.optimizer.config.RefinementConfig("ClassA", "roles", lower = 2, upper = 5)
+            )
+            val mutations = MutationRuleGenerator.generate(metaAB, specs, refinements)
+            val names = mutations.map { it.name }
+            assertEquals(names.distinct().size, names.size, "Expected no duplicate rule names; got: $names")
+            assertTrue(names.any { it.startsWith("S_") && it.contains("LBREPAIR") },
+                "Expected S_-prefixed LBREPAIR rule from refinement pass; got: $names")
+        }
+
+        @Test
+        fun `generate CREATE for Sprint with required plan association`() {
+            // Plan.sprints[0..*] *--> Sprint.plan[1]
+            // This tests Task 1: ensure Sprint.plan is properly assigned when creating a Sprint
+            val planClass = ClassData(name = "Plan", isAbstract = false)
+            val sprintClass = ClassData(name = "Sprint", isAbstract = false)
+
+            val planSprintsAssoc = AssociationData(
+                source = AssociationEndData(
+                    className = "Plan",
+                    name = "sprints",
+                    multiplicity = MultiplicityData.many()     // 0..*
+                ),
+                operator = "*-->",
+                target = AssociationEndData(
+                    className = "Sprint",
+                    name = "plan",
+                    multiplicity = MultiplicityData.single()   // 1..1
+                )
+            )
+
+            val metaData = MetamodelData(
+                path = "/project/scrum.mm",
+                classes = listOf(planClass, sprintClass),
+                associations = listOf(planSprintsAssoc)
+            )
+
+            // Generate CREATE operators for Sprint
+            val specs = listOf(MutationRuleSpec("Sprint", action = MutationAction.CREATE))
+            val mutations = MutationRuleGenerator.generate(metaData, specs)
+
+            val names = mutations.map { it.name }.toSet()
+            
+            // Should have contextual CREATE rule only (not standalone)
+            // because Sprint.plan has lower bound 1
+            assertTrue(
+                names.any { it.contains("Plan") && it.contains("sprints") },
+                "Expected CREATE_Sprint_in_Plan_via_sprints; got: $names"
+            )
+            assertFalse(
+                names.contains("CREATE_Sprint"),
+                "Expected NO standalone CREATE_Sprint (violates Sprint.plan lower bound); got: $names"
+            )
+
+            // Verify the contextual rule has both container and link
+            val contextualRule = mutations.find { it.name.contains("Plan") && it.name.contains("sprints") }
+            assertNotNull(contextualRule)
+            val stmt = contextualRule.typedAst.statements[0] as TypedMatchStatement
+            val instances = stmt.pattern.elements.filterIsInstance<TypedPatternObjectInstanceElement>()
+            val links = stmt.pattern.elements.filterIsInstance<TypedPatternLinkElement>()
+
+            // Should have: container (Plan), newNode (Sprint)
+            val containerInst = instances.find { it.objectInstance.className == "Plan" && it.objectInstance.modifier == null }
+            val createdInst = instances.find { it.objectInstance.className == "Sprint" && it.objectInstance.modifier == "create" }
+            assertNotNull(containerInst, "Expected to match Plan container")
+            assertNotNull(createdInst, "Expected to create Sprint node")
+
+            // Should have: create link between Plan and Sprint
+            assertTrue(links.isNotEmpty(), "Expected at least one link in pattern")
+            val createLink = links.find { it.link.modifier == "create" }
+            assertNotNull(createLink, "Expected create link for Plan->sprints->Sprint")
+        }
+
+        @Test
+        fun `generate CREATE for Sprint assigns an initial committed item`() {
+            val planClass = ClassData(name = "Plan", isAbstract = false)
+            val sprintClass = ClassData(name = "Sprint", isAbstract = false)
+            val workItemClass = ClassData(name = "WorkItem", isAbstract = false)
+
+            val planSprintsAssoc = AssociationData(
+                source = AssociationEndData(
+                    className = "Plan",
+                    name = "sprints",
+                    multiplicity = MultiplicityData.many()
+                ),
+                operator = "*-->",
+                target = AssociationEndData(
+                    className = "Sprint",
+                    name = "plan",
+                    multiplicity = MultiplicityData.single()
+                )
+            )
+
+            val sprintCommittedItemsAssoc = AssociationData(
+                source = AssociationEndData(
+                    className = "Sprint",
+                    name = "committedItems",
+                    multiplicity = MultiplicityData.oneOrMore()
+                ),
+                operator = "<-->",
+                target = AssociationEndData(
+                    className = "WorkItem",
+                    name = "isPlannedFor",
+                    multiplicity = MultiplicityData.optional()
+                )
+            )
+
+            val metaData = MetamodelData(
+                path = "/project/scrum.mm",
+                classes = listOf(planClass, sprintClass, workItemClass),
+                associations = listOf(planSprintsAssoc, sprintCommittedItemsAssoc)
+            )
+
+            val specs = listOf(MutationRuleSpec("Sprint", action = MutationAction.CREATE))
+            val mutations = MutationRuleGenerator.generate(metaData, specs)
+
+            val rule = mutations.find { it.name.contains("Plan") && it.name.contains("sprints") }
+            assertNotNull(rule, "Expected contextual CREATE_Sprint_in_Plan_via_sprints rule")
+
+            val stmt = requireNotNull(rule).typedAst.statements[0] as TypedMatchStatement
+            val instances = stmt.pattern.elements.filterIsInstance<TypedPatternObjectInstanceElement>()
+            val links = stmt.pattern.elements.filterIsInstance<TypedPatternLinkElement>()
+            val whereClauses = stmt.pattern.elements.filterIsInstance<TypedPatternWhereClauseElement>()
+
+            assertNotNull(instances.find { it.objectInstance.name == "container" && it.objectInstance.className == "Plan" })
+            assertNotNull(instances.find { it.objectInstance.name == "newNode" && it.objectInstance.className == "Sprint" && it.objectInstance.modifier == "create" })
+            assertNotNull(instances.find { it.objectInstance.name == "required_committedItems" && it.objectInstance.className == "WorkItem" })
+
+            val committedLink = links.find { it.link.source.propertyName == "committedItems" }
+            assertNotNull(committedLink, "Expected Sprint.committedItems create link")
+            assertEquals("required_committedItems", requireNotNull(committedLink).link.target.objectName)
+
+            assertTrue(
+                whereClauses.any { clause ->
+                    val expr = clause.whereClause.expression as TypedBinaryExpression
+                    val memberCall = expr.left as TypedMemberCallExpression
+                    val memberAccess = memberCall.expression as TypedMemberAccessExpression
+                    val identifier = memberAccess.expression as TypedIdentifierExpression
+                    expr.operator == "<" &&
+                        memberCall.member == "size" &&
+                        memberAccess.member == "isPlannedFor" &&
+                        identifier.name == "required_committedItems"
+                },
+                "Expected guard on WorkItem.isPlannedFor upper bound"
+            )
+        }
+
+        @Test
+        fun `generate CREATE LB repair for Sprint keeps Plan context`() {
+            val planClass = ClassData(name = "Plan", isAbstract = false)
+            val sprintClass = ClassData(name = "Sprint", isAbstract = false)
+
+            val planSprintsAssoc = AssociationData(
+                source = AssociationEndData(
+                    className = "Plan",
+                    name = "sprints",
+                    multiplicity = MultiplicityData.many()
+                ),
+                operator = "*-->",
+                target = AssociationEndData(
+                    className = "Sprint",
+                    name = "plan",
+                    multiplicity = MultiplicityData.single()
+                )
+            )
+
+            val sprintCommittedItemsAssoc = AssociationData(
+                source = AssociationEndData(
+                    className = "Sprint",
+                    name = "committedItems",
+                    multiplicity = MultiplicityData.oneOrMore()
+                ),
+                operator = "<-->",
+                target = AssociationEndData(
+                    className = "WorkItem",
+                    name = "isPlannedFor",
+                    multiplicity = MultiplicityData.optional()
+                )
+            )
+
+            val workItemClass = ClassData(name = "WorkItem", isAbstract = false)
+            val metaData = MetamodelData(
+                path = "/project/scrum.mm",
+                classes = listOf(planClass, sprintClass, workItemClass),
+                associations = listOf(planSprintsAssoc, sprintCommittedItemsAssoc)
+            )
+
+            val specs = listOf(MutationRuleSpec("Sprint", edge = "committedItems", action = MutationAction.CREATE))
+            val mutations = MutationRuleGenerator.generate(metaData, specs)
+            val names = mutations.map { it.name }.toSet()
+
+            assertTrue(
+                names.any { it.contains("Plan") && it.contains("sprints") && it.contains("LBREPAIR") },
+                "Expected contextual CREATE_Sprint_in_Plan_via_sprints_LBREPAIR; got: $names"
+            )
+            assertFalse(
+                names.contains("CREATE_Sprint_committedItems_LBREPAIR"),
+                "Expected no standalone CREATE_Sprint_committedItems_LBREPAIR; got: $names"
+            )
+
+            val contextualRule = mutations.find { it.name.contains("Plan") && it.name.contains("sprints") && it.name.contains("LBREPAIR") }
+            assertNotNull(contextualRule)
+            val stmt = contextualRule.typedAst.statements[0] as TypedMatchStatement
+            val instances = stmt.pattern.elements.filterIsInstance<TypedPatternObjectInstanceElement>()
+            assertNotNull(instances.find { it.objectInstance.name == "container" && it.objectInstance.className == "Plan" })
+            assertNotNull(instances.find { it.objectInstance.name == "newNode" && it.objectInstance.className == "Sprint" && it.objectInstance.modifier == "create" })
         }
     }
 }

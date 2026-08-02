@@ -192,6 +192,35 @@ object FileDataTable : Table("file_data") {
 }
 
 /**
+ * In-flight file data computations.
+ *
+ * A row exists only while a plugin is computing data for a file, and is what the token handed to
+ * that plugin is bound to: once the computation ends the row is gone and the token stops being
+ * accepted, even though it has not expired yet. Rows left behind by a crash are ignored once they
+ * are older than the configured computation timeout, and purged when the next computation starts.
+ */
+object FileDataComputationsTable : Table("file_data_computations") {
+    val id = uuid("id")
+    val projectId = uuid("project_id")
+    val path = varchar("path", 1024)
+    val dataKey = varchar("data_key", 255)
+    val startedAt = timestamp("started_at")
+
+    init {
+        foreignKey(
+            projectId,
+            path,
+            target = FilesTable.primaryKey,
+            onDelete = ReferenceOption.CASCADE,
+            onUpdate = ReferenceOption.CASCADE
+        )
+        index(false, startedAt)
+    }
+
+    override val primaryKey = PrimaryKey(id)
+}
+
+/**
  * File dependencies table schema for tracking file-to-file dependencies.
  */
 object FileDependenciesTable : Table("file_dependencies") {

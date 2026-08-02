@@ -2,6 +2,7 @@ import type { GModelElement, GModelRoot } from "@eclipse-glsp/server";
 import {
     sharedImport,
     BaseGModelFactory,
+    DefaultModelIdRegistry,
     GCompartment,
     GHorizontalDivider,
     NodeLayoutMetadataUtil,
@@ -16,10 +17,12 @@ import {
     type PatternPropertyAssignmentType,
     type PatternObjectInstanceReferenceType,
     type PatternObjectInstanceDeleteType,
+    type PatternVariableReassignmentType,
     PatternObjectInstance,
     PatternLink,
     WhereClause,
     PatternVariable,
+    PatternVariableReassignment,
     PatternObjectInstanceReference,
     PatternObjectInstanceDelete
 } from "../../grammar/modelTransformationTypes.js";
@@ -56,6 +59,7 @@ import { GVariableLabel } from "./model/variableLabel.js";
 import { EndNodeKind, ModelTransformationElementType, PatternModifierKind } from "@mdeo/protocol-model-transformation";
 import { ID } from "@mdeo/language-common";
 import { ModelTransformationIdGenerator } from "./modelTransformationIdGenerator.js";
+import { adaptGeneratedModelTransformationText } from "./generated/generatedModelTransformationAstAdapter.js";
 
 const { injectable } = sharedImport("inversify");
 const { GGraph } = sharedImport("@eclipse-glsp/server");
@@ -86,13 +90,33 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
         sourceModel: ModelTransformationType,
         idRegistry: ModelIdRegistry
     ): Promise<GModelRoot> {
+        const parsedDocument = sourceModel.$document;
+        const parserHasErrors =
+            (parsedDocument?.parseResult.parserErrors.length ?? 0) > 0 ||
+            (parsedDocument?.parseResult.lexerErrors.length ?? 0) > 0;
+
+        const fallbackModel =
+            parserHasErrors && parsedDocument != undefined
+                ? adaptGeneratedModelTransformationText(parsedDocument.textDocument.getText())
+                : undefined;
+
+        const effectiveSourceModel = fallbackModel ?? sourceModel;
+        const effectiveIdRegistry =
+            fallbackModel != undefined
+                ? new DefaultModelIdRegistry(effectiveSourceModel, this.modelIdProvider)
+                : idRegistry;
+
         const graph = GGraph.builder().id("transformation-graph").addCssClass("editor-model-transformation").build();
 
-        const converter = new ModelTransformationControlFlowConverter(sourceModel, idRegistry, this.reflection);
+        const converter = new ModelTransformationControlFlowConverter(
+            effectiveSourceModel,
+            effectiveIdRegistry,
+            this.reflection
+        );
         const cfg = converter.convert();
 
         for (const node of cfg.nodes) {
-            await this.createCFGNode(graph, node, idRegistry);
+            await this.createCFGNode(graph, node, effectiveIdRegistry);
         }
         for (const edge of cfg.edges) {
             await this.createControlFlowEdge(graph, edge.sourceId, edge.targetId, edge.label, edge.labelElementId);
@@ -612,6 +636,19 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
 
                 const label = GVariableLabel.builder().id(varId).text(varText).build();
                 variableLabels.push(label);
+            } else if (this.reflection.isInstance(element, PatternVariableReassignment)) {
+                const reassignment = element as PatternVariableReassignmentType;
+                const reassignId = idRegistry.getId(reassignment);
+                const rawName = reassignment.variable?.$refText ?? reassignment.variable?.ref?.name ?? "?";
+                const serializedName = this.modelState.languageServices.AstSerializer.serializePrimitive(
+                    { value: rawName },
+                    ID
+                );
+                const valueText = reassignment.value?.$cstNode?.text ?? "?";
+                const reassignText = `${serializedName} = ${valueText}`;
+
+                const label = GVariableLabel.builder().id(reassignId).text(reassignText).build();
+                variableLabels.push(label);
             }
         }
 
@@ -719,6 +756,12 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
         const sourceClassType = sourceInstanceRef?.class?.ref as ClassType | undefined;
         const targetClassType = targetInstanceRef?.class?.ref as ClassType | undefined;
 
+        // Navigable association ends may declare a role name in the metamodel. A pattern link doesn't have to repeat
+        // that name explicitly, so when the link's own DSL omits it, fall back to the resolved association
+        // end name (when available) so the edge can still show a role label.
+        let effectiveSourceProperty = sourceProperty;
+        let effectiveTargetProperty = targetProperty;
+
         if (sourceClassType != undefined && targetClassType != undefined) {
             const resolver = new LinkAssociationResolver(this.reflection);
             const candidates = resolver.findCandidates(sourceClassType, targetClassType);
@@ -732,12 +775,14 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
                 if (tgtClass?.name != undefined) {
                     edgeBuilder.targetClass(tgtClass.name);
                 }
+                effectiveSourceProperty = sourceProperty?.trim() || candidate.sourceEnd.name;
+                effectiveTargetProperty = targetProperty?.trim() || candidate.targetEnd.name;
             }
         }
 
         const edge = edgeBuilder.build();
 
-        await this.addPatternLinkLabels(edge, edgeId, sourceProperty, targetProperty);
+        await this.addPatternLinkLabels(edge, edgeId, effectiveSourceProperty, effectiveTargetProperty);
 
         if (modifier !== PatternModifierKind.NONE) {
             const modifierNodeId = `${edgeId}__modifier-node`;

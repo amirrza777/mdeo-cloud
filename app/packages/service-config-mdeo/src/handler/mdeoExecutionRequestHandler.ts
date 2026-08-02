@@ -1,16 +1,30 @@
-import type { RequestHandler, ExecuteResponse } from "@mdeo/service-common";
+import { ExecutionServiceWsProxy, type RequestHandler, type ExecuteResponse } from "@mdeo/service-common";
 import type {
     ConfigExecutionPluginRequestBody,
     ConfigExecutionFollowUpRequestBody,
-    ConfigExecutionFileRequestBody
+    ConfigExecutionFileRequestBody,
+    ConfigExecutionFilesRequestBody,
+    ConfigExecutionFilesResponse
 } from "@mdeo/service-config-common";
 import type { MdeoServices } from "@mdeo/language-config-mdeo";
+import type { ClassMutationData, EdgeMutationData, MutationsBlockData } from "./mdeoRequestTypes.js";
 
 /**
  * URL of the optimizer-execution backend service.
  * Configurable via OPTIMIZER_EXECUTION_SERVICE_URL env var.
  */
 const OPTIMIZER_SERVICE_URL = process.env.OPTIMIZER_EXECUTION_SERVICE_URL ?? "http://localhost:8083";
+
+/**
+ * Result access to the optimizer-execution service over the shared execution WebSocket
+ * protocol.
+ *
+ * An optimization run's results are read through two forwarding hops before they reach the
+ * browser, so a request per file was the dominant cost of opening one. This keeps a
+ * connection to the optimizer service warm across a burst of reads and can fetch a whole
+ * result set in one request.
+ */
+const optimizerResults = new ExecutionServiceWsProxy(OPTIMIZER_SERVICE_URL);
 
 /**
  * The key used by the config file-data handler (matches CONFIG_DATA_KEY in service-config).
@@ -33,6 +47,60 @@ function buildHeaders(jwt: string): Record<string, string> {
 
 type ConfigFileData = Record<string, Record<string, unknown>>;
 
+/** Kotlin MutationAction enum values accepted by the backend. */
+type MutationAction = "ALL" | "CREATE" | "DELETE" | "ADD" | "REMOVE";
+
+/** Shape of a single Kotlin MutationRuleSpec entry. */
+type MutationRuleSpec = { node: string; edge?: string; action: MutationAction };
+
+/**
+ * Converts the frontend `classMutations` and `edgeMutations` lists into
+ * `MutationRuleSpec` entries for the Kotlin `MutationsConfig.generate` field.
+ *
+ * Mapping:
+ *   classMutation create  → CREATE
+ *   classMutation delete  → DELETE
+ *   classMutation mutate  → ALL
+ *   edgeMutation  add     → ADD
+ *   edgeMutation  remove  → REMOVE
+ *   edgeMutation  mutate  → ADD + REMOVE (two specs)
+ */
+function buildGenerateSpecs(
+    classMutations: ClassMutationData[],
+    edgeMutations: EdgeMutationData[]
+): MutationRuleSpec[] {
+    const specs: MutationRuleSpec[] = [];
+
+    for (const cm of classMutations) {
+        const action: MutationAction =
+            cm.operator === "create" ? "CREATE" : cm.operator === "delete" ? "DELETE" : "ALL";
+        specs.push({ node: cm.className, action });
+    }
+
+    for (const em of edgeMutations) {
+        if (em.operator === "mutate") {
+            specs.push({ node: em.className, edge: em.edgeName, action: "ADD" });
+            specs.push({ node: em.className, edge: em.edgeName, action: "REMOVE" });
+        } else {
+            const action: MutationAction = em.operator === "add" ? "ADD" : "REMOVE";
+            specs.push({ node: em.className, edge: em.edgeName, action });
+        }
+    }
+
+    return specs;
+}
+
+/**
+ * Transforms the frontend MutationsBlockData into the shape expected by the Kotlin
+ * MutationsConfig: replaces classMutations/edgeMutations with a `generate` list.
+ */
+function buildMutationsPayload(mutations: MutationsBlockData): { usingPaths: string[]; generate: MutationRuleSpec[] } {
+    return {
+        usingPaths: mutations.usingPaths,
+        generate: buildGenerateSpecs(mutations.classMutations, mutations.edgeMutations)
+    };
+}
+
 /**
  * Execution request handler for MDEO config sections.
  *
@@ -40,8 +108,9 @@ type ConfigFileData = Record<string, Record<string, unknown>>;
  * (problem, goal from the optimization plugin; search, solver from the MDEO plugin)
  * into the OptimizationConfig payload expected by the optimizer-execution backend.
  *
- * No field conversion is needed here because the plugin request handlers already
- * produce data whose shape matches the Kotlin backend types directly.
+ * The search.mutations block is transformed from the frontend shape
+ * (usingPaths + classMutations + edgeMutations) into the Kotlin MutationsConfig shape
+ * (usingPaths + generate).
  */
 export const mdeoExecutionRequestHandler: RequestHandler<ExecuteResponse, MdeoServices> = async (context) => {
     const body = context.body as Partial<ConfigExecutionPluginRequestBody>;
@@ -73,6 +142,11 @@ export const mdeoExecutionRequestHandler: RequestHandler<ExecuteResponse, MdeoSe
         throw new Error("Missing 'solver' section in config file data");
     }
 
+    const rawSearch = mdeoData.search as { mutations?: MutationsBlockData };
+    const transformedSearch = rawSearch?.mutations
+        ? { mutations: buildMutationsPayload(rawSearch.mutations) }
+        : rawSearch;
+
     const requestBody = {
         executionId: body.executionId,
         project: body.project,
@@ -80,7 +154,7 @@ export const mdeoExecutionRequestHandler: RequestHandler<ExecuteResponse, MdeoSe
         data: {
             problem: optimizationData.problem,
             goal: optimizationData.goal,
-            search: mdeoData.search,
+            search: transformedSearch,
             solver: mdeoData.solver,
             runtime: mdeoData.runtime
         }
@@ -111,30 +185,14 @@ export const mdeoExecutionRequestHandler: RequestHandler<ExecuteResponse, MdeoSe
  * Summary request handler — forwards to optimizer-execution backend.
  */
 export const mdeoExecutionGetSummaryRequestHandler: RequestHandler<string, MdeoServices> = async (context) => {
-    const body = context.body as Partial<ConfigExecutionFollowUpRequestBody>;
-    const response = await fetch(`${OPTIMIZER_SERVICE_URL}/api/executions/${body.executionId}/summary`, {
-        headers: buildHeaders(context.jwt)
-    });
-    if (!response.ok) {
-        throw new Error(`Failed to get optimizer execution summary: ${response.status}`);
-    }
-    const result = (await response.json()) as { summary?: string };
-    return result.summary ?? "";
+    return optimizerResults.getSummary(proxyContext(context));
 };
 
 /**
  * File tree request handler — forwards to optimizer-execution backend.
  */
 export const mdeoExecutionGetFileTreeRequestHandler: RequestHandler<unknown[], MdeoServices> = async (context) => {
-    const body = context.body as Partial<ConfigExecutionFollowUpRequestBody>;
-    const response = await fetch(`${OPTIMIZER_SERVICE_URL}/api/executions/${body.executionId}/file-tree`, {
-        headers: buildHeaders(context.jwt)
-    });
-    if (!response.ok) {
-        throw new Error(`Failed to get optimizer execution file tree: ${response.status}`);
-    }
-    const result = (await response.json()) as { files?: unknown[] };
-    return result.files ?? [];
+    return optimizerResults.getFileTree(proxyContext(context));
 };
 
 /**
@@ -142,40 +200,52 @@ export const mdeoExecutionGetFileTreeRequestHandler: RequestHandler<unknown[], M
  */
 export const mdeoExecutionGetFileRequestHandler: RequestHandler<string, MdeoServices> = async (context) => {
     const body = context.body as Partial<ConfigExecutionFileRequestBody>;
-    const filePath = body.path ?? "";
-    const response = await fetch(`${OPTIMIZER_SERVICE_URL}/api/executions/${body.executionId}/files/${filePath}`, {
-        headers: buildHeaders(context.jwt)
+    return optimizerResults.getFile(proxyContext(context), body.path ?? "");
+};
+
+/**
+ * Bulk file read request handler — fetches a whole result set from the optimizer-execution
+ * backend in one request.
+ *
+ * The files stream back from the optimizer service one at a time, but the plugin-request
+ * channel that carries the answer onward cannot stream, so they are collected and returned
+ * together.
+ */
+export const mdeoExecutionGetFilesRequestHandler: RequestHandler<ConfigExecutionFilesResponse, MdeoServices> = async (
+    context
+) => {
+    const body = context.body as Partial<ConfigExecutionFilesRequestBody>;
+    const contents: Record<string, string> = {};
+    const files = await optimizerResults.getFiles(proxyContext(context), body.paths ?? null, (path, content) => {
+        contents[path] = content;
     });
-    if (!response.ok) {
-        throw new Error(`Failed to get optimizer execution file: ${response.status}`);
-    }
-    return await response.text();
+    return { files, contents };
 };
 
 /**
  * Cancel request handler — forwards to optimizer-execution backend.
  */
 export const mdeoExecutionCancelRequestHandler: RequestHandler<void, MdeoServices> = async (context) => {
-    const body = context.body as Partial<ConfigExecutionFollowUpRequestBody>;
-    const response = await fetch(`${OPTIMIZER_SERVICE_URL}/api/executions/${body.executionId}/cancel`, {
-        method: "POST",
-        headers: buildHeaders(context.jwt)
-    });
-    if (!response.ok) {
-        throw new Error(`Failed to cancel optimizer execution: ${response.status}`);
-    }
+    await optimizerResults.cancel(proxyContext(context));
 };
 
 /**
  * Delete request handler — forwards to optimizer-execution backend.
  */
 export const mdeoExecutionDeleteRequestHandler: RequestHandler<void, MdeoServices> = async (context) => {
-    const body = context.body as Partial<ConfigExecutionFollowUpRequestBody>;
-    const response = await fetch(`${OPTIMIZER_SERVICE_URL}/api/executions/${body.executionId}`, {
-        method: "DELETE",
-        headers: buildHeaders(context.jwt)
-    });
-    if (!response.ok) {
-        throw new Error(`Failed to delete optimizer execution: ${response.status}`);
-    }
+    await optimizerResults.delete(proxyContext(context));
 };
+
+/**
+ * Extracts what the optimizer proxy needs from a plugin request.
+ *
+ * @param context The plugin request context
+ * @returns The execution and token the request addresses
+ */
+function proxyContext(context: { body: unknown; jwt: string }): { executionId: string; jwt: string } {
+    const body = context.body as Partial<ConfigExecutionFollowUpRequestBody>;
+    if (!body.executionId) {
+        throw new Error("Missing executionId in optimizer execution request body");
+    }
+    return { executionId: body.executionId, jwt: context.jwt };
+}

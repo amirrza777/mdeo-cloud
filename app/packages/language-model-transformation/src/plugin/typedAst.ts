@@ -55,6 +55,33 @@ export interface TypedPatternVariable {
 }
 
 /**
+ * Reassignment of a variable declared in an enclosing scope.
+ */
+export interface TypedPatternVariableReassignment {
+    /**
+     * Name of the variable being reassigned.
+     */
+    name: string;
+
+    /**
+     * The value expression assigned to the variable.
+     */
+    value: TypedExpression;
+}
+
+/**
+ * Discriminated union of all operators that can appear in a
+ * PatternPropertyAssignment.
+ *
+ * - `"="` — assignment (sets the property when creating/modifying an instance).
+ * - `"=="` — equality comparison constraint.
+ * - `"!="` — inequality comparison constraint.
+ * - `"<"`, `">"`, `"<="`, `">="` — relational comparison constraints
+ *   (only valid for comparable / numeric property types).
+ */
+export type PatternPropertyOperator = "=" | "==" | "!=" | "<" | ">" | "<=" | ">=";
+
+/**
  * Property assignment in a pattern object instance.
  */
 export interface TypedPatternPropertyAssignment {
@@ -64,9 +91,10 @@ export interface TypedPatternPropertyAssignment {
     propertyName: string;
 
     /**
-     * The operator used (= for assignment, == for comparison).
+     * The operator used.
+     * `"="` is for assignment; all others are comparison constraints.
      */
-    operator: string;
+    operator: PatternPropertyOperator;
 
     /**
      * The value expression.
@@ -170,6 +198,17 @@ export interface TypedPatternVariableElement extends TypedPatternElement {
 }
 
 /**
+ * Pattern variable reassignment element.
+ */
+export interface TypedPatternVariableReassignmentElement extends TypedPatternElement {
+    kind: "variableReassignment";
+    /**
+     * The variable reassignment.
+     */
+    reassignment: TypedPatternVariableReassignment;
+}
+
+/**
  * Pattern object instance element.
  */
 export interface TypedPatternObjectInstanceElement extends TypedPatternElement {
@@ -211,6 +250,7 @@ export interface TypedPattern {
      */
     elements: (
         | TypedPatternVariableElement
+        | TypedPatternVariableReassignmentElement
         | TypedPatternObjectInstanceElement
         | TypedPatternLinkElement
         | TypedPatternWhereClauseElement

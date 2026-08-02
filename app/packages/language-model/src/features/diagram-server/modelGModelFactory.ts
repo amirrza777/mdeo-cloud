@@ -7,12 +7,13 @@ import {
     EdgeLayoutMetadataUtil,
     NodeLayoutMetadataUtil,
     parseIdentifier,
-    resolveRelativePath
+    resolveRelativePath,
+    parseCsv
 } from "@mdeo/language-shared";
 import type { ModelIdRegistry, GraphMetadata } from "@mdeo/language-shared";
 import type { NodeLayoutMetadata, EdgeLayoutMetadata } from "@mdeo/protocol-common";
 import { ID } from "@mdeo/language-common";
-import { resolveClassChain, type ClassType } from "@mdeo/language-metamodel";
+import { resolveClassChain, type ClassType, type PropertyType } from "@mdeo/language-metamodel";
 import type {
     PartialModel,
     PartialObjectInstance,
@@ -40,6 +41,20 @@ const { injectable } = sharedImport("inversify");
 const { GGraph } = sharedImport("@eclipse-glsp/server");
 
 type GGraphType = ReturnType<typeof GGraph.builder>["proxy"];
+
+/**
+ * Reserved CSV column holding a row's identifier for cross-object references.
+ * It is not a metamodel property, so it is never displayed as one.
+ */
+const CSV_ID_COLUMN = "_id";
+
+/**
+ * A CSV column that maps onto a metamodel property of the imported class.
+ */
+interface CsvColumnBinding {
+    index: number;
+    property: PropertyType;
+}
 
 /**
  * Factory for creating GLSP graph models from model AST.
@@ -381,6 +396,12 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
         const sourceClassType = sourceObj.class?.ref as ClassType | undefined;
         const targetClassType = targetObj.class?.ref as ClassType | undefined;
 
+        // Navigable association ends may declare a role name in the metamodel. A link doesn't have to repeat
+        // that name explicitly, so when the link's own DSL omits it, fall back to the resolved association
+        // end name (when available) so the edge can still show a role label.
+        let effectiveSourceProperty = sourceProperty;
+        let effectiveTargetProperty = targetProperty;
+
         if (sourceClassType != undefined && targetClassType != undefined) {
             const resolver = new LinkAssociationResolver(this.reflection);
             const candidates = resolver.findCandidates(sourceClassType, targetClassType);
@@ -394,11 +415,13 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
                 if (tgtClass?.name != undefined) {
                     edgeBuilder.targetClass(tgtClass.name);
                 }
+                effectiveSourceProperty = sourceProperty?.trim() || candidate.sourceEnd.name;
+                effectiveTargetProperty = targetProperty?.trim() || candidate.targetEnd.name;
             }
         }
 
         const edge = edgeBuilder.build();
-        await this.addLinkLabels(edge, edgeId, sourceProperty, targetProperty);
+        await this.addLinkLabels(edge, edgeId, effectiveSourceProperty, effectiveTargetProperty);
 
         return edge;
     }
@@ -479,6 +502,7 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
         interface CsvClassImportShape {
             class?: { ref?: ClassType };
             file?: string;
+            mappings?: { csvColumn?: string; property?: string }[];
         }
 
         const csvImport = model.imports?.find((imp) => (imp as { $type?: string }).$type === getWrapperInterfaceName("CSV"));
@@ -496,10 +520,12 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
             try {
                 const uri = resolveRelativePath(doc, entry.file ?? "");
                 const csvContent = await this.modelState.languageServices.shared.workspace.FileSystemProvider.readFile(uri);
-                const rows = csvContent.split(/\r?\n/).filter((line: string) => line.trim() !== "").map((line: string) => line.split(","));
+                const rows = parseCsv(csvContent);
                 if (rows.length < 2) continue;
-                const classHierarchy = resolveClassChain(classRef, this.reflection).map((c) => c.name);
-                rows.slice(1).forEach((_row: string[], rowIndex: number) => {
+                const classChain = resolveClassChain(classRef, this.reflection);
+                const classHierarchy = classChain.map((c) => c.name);
+                const columns = this.resolveCsvColumns(rows[0], classChain, entry.mappings);
+                rows.slice(1).forEach((row: string[], rowIndex: number) => {
                     const instanceName = `${classRef.name}_${rowIndex}`;
                     const nodeId = `csv-node-${nodeIndex++}`;
                     const metadata = validatedMetadata.nodes[nodeId]?.meta ?? {};
@@ -510,7 +536,10 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
                         .classHierarchy(classHierarchy)
                         .meta(metadata)
                         .build();
-                    node.children.push(...this.createObjectHeader(nodeId, instanceName, classRef.name));
+                    node.children.push(
+                        ...this.createObjectHeader(nodeId, instanceName, classRef.name),
+                        ...this.createCsvPropertyAssignments(nodeId, columns, row)
+                    );
                     graph.children.push(node);
                 });
             } catch {
@@ -519,4 +548,155 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
         }
     }
 
+    /**
+     * Resolves which CSV columns correspond to properties of the imported class.
+     *
+     * When the import declares an explicit mapping, only the mapped columns are
+     * used, so a column can also be left out deliberately. Otherwise columns are
+     * matched to properties by name across the class' whole extension chain. Either
+     * way this mirrors how the import itself resolves them, so the diagram shows
+     * the same columns the import reads. Unmatched columns and the reserved `_id`
+     * row identifier are dropped, so they are simply not shown.
+     *
+     * @param header The CSV header row
+     * @param classChain The imported class and its extended classes
+     * @param mappings The import's explicit column to property mappings, if any
+     * @returns The column index and property for every column that maps to one
+     */
+    private resolveCsvColumns(
+        header: string[],
+        classChain: ClassType[],
+        mappings?: { csvColumn?: string; property?: string }[]
+    ): CsvColumnBinding[] {
+        const propertiesByName = new Map<string, PropertyType>();
+        for (const cls of classChain) {
+            for (const property of cls.properties ?? []) {
+                if (property?.name != undefined && !propertiesByName.has(property.name)) {
+                    propertiesByName.set(property.name, property);
+                }
+            }
+        }
+
+        const columns: CsvColumnBinding[] = [];
+
+        if (mappings != undefined && mappings.length > 0) {
+            for (const mapping of mappings) {
+                if (mapping.csvColumn == undefined || mapping.property == undefined) {
+                    continue;
+                }
+                const index = header.indexOf(mapping.csvColumn);
+                const property = propertiesByName.get(mapping.property);
+                if (index >= 0 && property != undefined) {
+                    columns.push({ index, property });
+                }
+            }
+            return columns;
+        }
+
+        header.forEach((columnName, index) => {
+            if (columnName === CSV_ID_COLUMN) {
+                return;
+            }
+            const property = propertiesByName.get(columnName);
+            if (property != undefined) {
+                columns.push({ index, property });
+            }
+        });
+        return columns;
+    }
+
+    /**
+     * Creates the property assignments compartment for a CSV-imported node.
+     *
+     * Mirrors {@link createPropertyAssignments}, but reads values straight from a
+     * CSV row instead of from property assignment AST nodes, since CSV-imported
+     * instances have no backing AST. The labels are read-only because editing them
+     * could not be written back to the CSV file.
+     *
+     * @param nodeId The ID of the object node
+     * @param columns The columns that map to properties, from {@link resolveCsvColumns}
+     * @param row The CSV data row for this node
+     * @returns Array of GModelElements for the properties compartment
+     */
+    private createCsvPropertyAssignments(
+        nodeId: string,
+        columns: CsvColumnBinding[],
+        row: string[]
+    ): GModelElement[] {
+        const propertyLabels: GPropertyLabel[] = [];
+        for (const { index, property } of columns) {
+            const rawValue = row[index];
+            if (rawValue == undefined || rawValue.trim() === "") {
+                continue;
+            }
+            const propertyName = this.modelState.languageServices.AstSerializer.serializePrimitive(
+                { value: property.name },
+                ID
+            );
+            propertyLabels.push(
+                GPropertyLabel.builder()
+                    .id(`${nodeId}__prop-${index}`)
+                    .text(`${propertyName} = ${this.formatCsvValue(rawValue, property)}`)
+                    .readonly(true)
+                    .build()
+            );
+        }
+
+        if (propertyLabels.length === 0) {
+            return [];
+        }
+
+        const divider = GHorizontalDivider.builder().type(ModelElementType.DIVIDER).id(`${nodeId}__divider`).build();
+        const propertiesCompartment = GCompartment.builder()
+            .type(ModelElementType.COMPARTMENT)
+            .id(`${nodeId}__properties-compartment`)
+            .build();
+        propertiesCompartment.children.push(...propertyLabels);
+
+        return [divider, propertiesCompartment];
+    }
+
+    /**
+     * Formats a raw CSV cell for display, following the property's declared type.
+     *
+     * Uses the same type interpretation as the CSV import itself, so the diagram
+     * shows the value the import would produce, and renders it the same way
+     * hand-authored values are rendered. Values that don't parse as their declared
+     * numeric type fall back to being shown as text rather than as `NaN`.
+     *
+     * @param rawValue The raw cell text
+     * @param property The metamodel property the column maps to
+     * @returns The formatted value string
+     */
+    private formatCsvValue(rawValue: string, property: PropertyType): string {
+        const value = rawValue.trim();
+        const propertyType = property.type as
+            | { name?: string; enum?: { ref?: { name?: string }; $refText?: string } }
+            | undefined;
+
+        const enumName =
+            (propertyType?.enum?.ref as { name?: string } | undefined)?.name ??
+            (propertyType?.enum != undefined ? parseIdentifier(propertyType.enum.$refText ?? "?") : undefined);
+        if (enumName != undefined) {
+            const serializer = this.modelState.languageServices.AstSerializer;
+            return `${serializer.serializePrimitive({ value: enumName }, ID)}.${serializer.serializePrimitive({ value }, ID)}`;
+        }
+
+        switch (propertyType?.name) {
+            case "int":
+            case "long": {
+                const parsed = parseInt(value, 10);
+                return isNaN(parsed) ? `"${value}"` : String(parsed);
+            }
+            case "double":
+            case "float": {
+                const parsed = parseFloat(value);
+                return isNaN(parsed) ? `"${value}"` : String(parsed);
+            }
+            case "boolean":
+                return String(value.toLowerCase() === "true");
+            default:
+                return `"${value}"`;
+        }
+    }
 }

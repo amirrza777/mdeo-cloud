@@ -45,6 +45,26 @@ class BagImpl<T> : Bag<T> {
         }
     }
 
+    /**
+     * Creates a bag that takes ownership of [owned] rather than copying it.
+     *
+     * The derivation operators below (`filter`, `reject`, `including`, …) each build a
+     * fresh [HashBag] that is not reachable from anywhere else. Handing it to the
+     * [kotlin.collections.Collection] constructor would copy every element into a second
+     * [HashBag]; adopting it directly halves the work. Callers must not retain a reference
+     * to [owned] afterwards.
+     *
+     * @param owned the backing bag to adopt.
+     * @param marker distinguishes this constructor from the [kotlin.collections.Collection]
+     *   one, which [HashBag] would otherwise also match.
+     */
+    private constructor(owned: HashBag<T>, @Suppress("UNUSED_PARAMETER") marker: Unit) {
+        backing = owned
+    }
+
+    /** Wraps a freshly built [bag] without copying it. See the adopting constructor. */
+    private fun adopt(bag: HashBag<T>): BagImpl<T> = BagImpl(bag, Unit)
+
     override fun iterator(): Iterator<T> = backing.iterator()
 
     override fun size(): Int = backing.size
@@ -93,7 +113,7 @@ class BagImpl<T> : Bag<T> {
     override fun excluding(item: Any?): ReadonlyCollection<T> {
         val result = HashBag(backing)
         result.remove(item, 1)
-        return BagImpl(result)
+        return adopt(result)
     }
 
     override fun excludingAll(col: ReadonlyCollection<T>): ReadonlyCollection<T> {
@@ -101,13 +121,13 @@ class BagImpl<T> : Bag<T> {
         for (element in col) {
             result.remove(element, 1)
         }
-        return BagImpl(result)
+        return adopt(result)
     }
 
     override fun including(item: T): ReadonlyCollection<T> {
         val result = HashBag(backing)
         result.add(item)
-        return BagImpl(result)
+        return adopt(result)
     }
 
     override fun includingAll(col: ReadonlyCollection<T>): ReadonlyCollection<T> {
@@ -115,7 +135,7 @@ class BagImpl<T> : Bag<T> {
         for (element in col) {
             result.add(element)
         }
-        return BagImpl(result)
+        return adopt(result)
     }
 
     override fun random(): T {
@@ -317,7 +337,7 @@ class BagImpl<T> : Bag<T> {
                 result.add(element)
             }
         }
-        return BagImpl(result)
+        return adopt(result)
     }
 
     override fun rejectOne(predicate: Predicate1<T>): Bag<T> {
@@ -330,7 +350,7 @@ class BagImpl<T> : Bag<T> {
                 result.add(element)
             }
         }
-        return BagImpl(result)
+        return adopt(result)
     }
 
     override fun filter(predicate: Predicate1<T>): Bag<T> {
@@ -340,7 +360,7 @@ class BagImpl<T> : Bag<T> {
                 result.add(element)
             }
         }
-        return BagImpl(result)
+        return adopt(result)
     }
 
     override fun find(predicate: Predicate1<T>): T? {

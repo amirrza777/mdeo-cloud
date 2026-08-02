@@ -13,15 +13,14 @@ import { useColorMode } from "@vueuse/core";
 import {
     getService,
     IBulkEditService,
-    IConfigurationService,
     IEditorService,
     IFileService,
     ILogService,
     ISearchService,
     IWorkspaceContextService
 } from "@codingame/monaco-vscode-api";
-import { WorkspaceSearchProvider } from "@codingame/monaco-vscode-search-service-override/service-override/tools/search-providers/workspace-search-provider";
 import { SearchProviderType } from "@codingame/monaco-vscode-api/vscode/vs/workbench/services/search/common/search";
+import { ProjectSearchProvider } from "@/data/search/projectSearchProvider";
 import { type OpenEditor } from "@codingame/monaco-vscode-editor-service-override";
 import { ConfigurationModel } from "@codingame/monaco-vscode-api/vscode/vs/platform/configuration/common/configurationModels";
 
@@ -94,7 +93,6 @@ async function setupMonaco(): Promise<MonacoApi> {
 
     const workspaceContextService = await getService(IWorkspaceContextService);
     const fileService = await getService(IFileService);
-    const configurationService = await getService(IConfigurationService);
     const logService = await getService(ILogService);
     const searchService = await getService(ISearchService);
     const editorService = await getService(IEditorService);
@@ -104,18 +102,9 @@ async function setupMonaco(): Promise<MonacoApi> {
     workspaceContextService.loadFolderConfigurations = async (folders: any[]) =>
         folders.map(() => ConfigurationModel.createEmptyModel(logService));
 
-    workspaceContextService.onDidChangeWorkspaceFolders(() => {
-        const provider = new WorkspaceSearchProvider(
-            fileService,
-            logService,
-            workspaceContextService,
-            undefined,
-            configurationService
-        );
-
-        searchService.registerSearchResultProvider("file", SearchProviderType.file, provider);
-        searchService.registerSearchResultProvider("file", SearchProviderType.text, provider);
-    });
+    const searchProvider = new ProjectSearchProvider(fileService);
+    searchService.registerSearchResultProvider("file", SearchProviderType.file, searchProvider);
+    searchService.registerSearchResultProvider("file", SearchProviderType.text, searchProvider);
 
     monacoApi = {
         monaco,

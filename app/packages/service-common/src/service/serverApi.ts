@@ -21,6 +21,33 @@ export interface FileData {
 }
 
 /**
+ * Maximum number of characters of a failed response body included in an error message.
+ */
+const MAX_ERROR_BODY_LENGTH = 500;
+
+/**
+ * Describes a failed response for use in an error message.
+ *
+ * The body is included because the backend reports why a call failed in it, and without it a
+ * failure deep in a computation is reduced to a bare status code that says nothing about its cause.
+ *
+ * @param response The failed response
+ * @returns The status, status text and (truncated) body of the response
+ */
+async function describeFailedResponse(response: Response): Promise<string> {
+    let body: string;
+    try {
+        body = (await response.text()).trim();
+    } catch {
+        body = "";
+    }
+    const truncated = body.length > MAX_ERROR_BODY_LENGTH ? `${body.slice(0, MAX_ERROR_BODY_LENGTH)}...` : body;
+    return truncated.length > 0
+        ? `${response.status} ${response.statusText}: ${truncated}`
+        : `${response.status} ${response.statusText}`;
+}
+
+/**
  * Interface for the server API injected into Langium services
  */
 export interface ServerApi {
@@ -175,7 +202,7 @@ export class HttpServerApi implements ServerApi {
         });
 
         if (!response.ok) {
-            throw new Error(`Failed to read file ${path}: ${response.status} ${response.statusText}`);
+            throw new Error(`Failed to read file ${path}: ${await describeFailedResponse(response)}`);
         }
 
         const result = await response.json();
@@ -208,7 +235,7 @@ export class HttpServerApi implements ServerApi {
         });
 
         if (!response.ok) {
-            throw new Error(`Failed to get file data ${path}:${key}: ${response.status} ${response.statusText}`);
+            throw new Error(`Failed to get file data ${path}:${key}: ${await describeFailedResponse(response)}`);
         }
 
         const result = await response.json();
@@ -235,7 +262,7 @@ export class HttpServerApi implements ServerApi {
         });
 
         if (!response.ok) {
-            throw new Error(`Failed to list directory ${path}: ${response.status} ${response.statusText}`);
+            throw new Error(`Failed to list directory ${path}: ${await describeFailedResponse(response)}`);
         }
 
         const result = await response.json();
@@ -268,7 +295,7 @@ export class HttpServerApi implements ServerApi {
 
         if (!response.ok) {
             throw new Error(
-                `Plugin request failed for ${languageId}/${key}: ${response.status} ${response.statusText}`
+                `Plugin request failed for ${languageId}/${key}: ${await describeFailedResponse(response)}`
             );
         }
 
@@ -286,7 +313,7 @@ export class HttpServerApi implements ServerApi {
 
         if (!response.ok) {
             throw new Error(
-                `Failed to update execution metadata ${executionId}: ${response.status} ${response.statusText}`
+                `Failed to update execution metadata ${executionId}: ${await describeFailedResponse(response)}`
             );
         }
     }

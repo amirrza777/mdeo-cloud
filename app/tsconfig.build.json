@@ -93,6 +93,9 @@
             "path": "packages/service-model"
         },
         {
+            "path": "packages/service-model-common"
+        },
+        {
             "path": "packages/service-model-csv"
         },
         {

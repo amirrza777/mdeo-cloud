@@ -74,7 +74,7 @@ class LocalWorkerClient(
         // No HTTP client or WebSocket connections to release
     }
 
-    override suspend fun sendAndReceive(msg: WorkerWsMessage, timeoutMs: Long): WorkerWsMessage {
+    override suspend fun sendAndReceive(msg: WorkerWsMessage): WorkerWsMessage {
         val execId = currentExecutionId
             ?: throw IllegalStateException("No active execution on node $nodeId")
         val responses = workerService.dispatchToSubprocess(execId, msg)

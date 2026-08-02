@@ -157,31 +157,31 @@ async function handleCreate(
         return;
     }
 
-    const parent = findParentFolder(root, resource);
+    const parent = ensureParentFolder(root, resource);
     if (parent == undefined) {
         return;
     }
 
     const name = getResourceName(resource);
-    if (parent.children.some((child) => child.name === name)) {
-        return;
-    }
-
-    const childUri = markRaw(resource);
 
     if (target.isDirectory) {
-        const folder = reactive<Folder>({
-            id: childUri.path,
-            name,
-            type: FileType.Directory,
-            uri: childUri,
-            children: [],
-            parent
-        });
-        const children = await loadChildren(monacoApi, childUri, folder);
-        folder.children = children;
-        parent.children.push(folder);
+        const folder = ensureFolder(parent, name);
+        if (folder == undefined) {
+            return;
+        }
+
+        const children = await loadChildren(monacoApi, folder.uri, folder);
+        for (const child of children) {
+            if (!folder.children.some((existing) => existing.name === child.name)) {
+                folder.children.push(child);
+            }
+        }
     } else {
+        if (parent.children.some((child) => child.name === name)) {
+            return;
+        }
+
+        const childUri = markRaw(resource);
         parent.children.push(
             reactive<File>({
                 id: childUri.path,
@@ -193,6 +193,70 @@ async function handleCreate(
             })
         );
     }
+}
+
+/**
+ * Returns the child folder with the given name, adding it to the tree if it does not exist yet.
+ *
+ * @param parent Folder to look in
+ * @param name Name of the child folder
+ * @returns The existing or newly added folder, or null if a file of that name already exists
+ */
+function ensureFolder(parent: Folder, name: string): Folder | null {
+    const existing = parent.children.find((child) => child.name === name);
+    if (existing != undefined) {
+        return existing.type === FileType.Directory ? existing : null;
+    }
+
+    const folderUri = markRaw(Uri.file(`${parent.uri.path}/${name}`));
+    const folder = reactive<Folder>({
+        id: folderUri.path,
+        name,
+        type: FileType.Directory,
+        uri: folderUri,
+        children: [],
+        parent
+    });
+    parent.children.push(folder);
+
+    return folder;
+}
+
+/**
+ * Finds the parent folder of a created resource, adding any missing folders along the way.
+ *
+ * Writing a file to a nested path implicitly creates its parent folders, but the file service only
+ * reports the created file itself, so those folders would otherwise never show up in the tree.
+ *
+ * @param root Root folder of the file tree
+ * @param resource Uri of the created resource
+ * @returns The parent folder, or null if it cannot be represented in the tree
+ */
+function ensureParentFolder(root: Folder, resource: Uri): Folder | null {
+    const path = resource.path;
+    const segments = path.split("/").filter((s) => s.length > 0);
+
+    if (segments.length <= 2) {
+        return null;
+    }
+
+    let current: Folder = root;
+
+    for (let i = 2; i < segments.length - 1; i++) {
+        const name = segments[i];
+        if (name == undefined) {
+            return null;
+        }
+
+        const child = ensureFolder(current, name);
+        if (child == null) {
+            return null;
+        }
+
+        current = child;
+    }
+
+    return current;
 }
 
 /**

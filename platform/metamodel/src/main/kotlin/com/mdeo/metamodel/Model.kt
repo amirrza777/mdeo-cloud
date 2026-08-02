@@ -2,6 +2,7 @@ package com.mdeo.metamodel
 
 import com.mdeo.metamodel.data.*
 import java.util.IdentityHashMap
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * A loaded model backed by a [Metamodel].
@@ -18,18 +19,41 @@ class Model(
     val metamodelPath: String,
     val instancesByName: Map<String, ModelInstance>
 ) {
+
+    /**
+     * Per-class extents, computed on first request and reused afterwards.
+     *
+     * A model's instance set is fixed at construction: every call site builds its own map
+     * and hands it over ([Metamodel.loadModel], [ModelBinarySerializer.deserialize],
+     * `MdeoGraph.toModel`), and nothing writes to [instancesByName] afterwards — a graph
+     * mutation produces a *new* [Model], it does not update an existing one. Extents are
+     * therefore stable for the lifetime of this object and safe to memoize.
+     *
+     * A [ConcurrentHashMap] is used because guidance functions for different solutions may
+     * run on different threads; a lost race merely recomputes an identical list.
+     */
+    private val extents = ConcurrentHashMap<String, List<ModelInstance>>()
+
     /**
      * Returns all instances of the given [className], including instances of subtypes.
      *
-     * Computed on the fly from [instancesByName] so that live mutations to the backing
-     * map (e.g. from [com.mdeo.modeltransformation.graph.mdeo.MdeoGraph]) are always reflected.
+     * The result is computed once per class and cached. This matters because scripts reach
+     * the model exclusively through `X.all()`, which compiles to a call to this method: a
+     * guidance function that calls `X.all()` inside a nested loop would otherwise rescan
+     * every instance in the model on each iteration.
+     *
+     * The returned list is shared with later callers and must not be modified. All current
+     * callers either copy it into a collection wrapper or read it positionally.
      *
      * @param className The metamodel class name to query.
      * @return List of all matching instances, or an empty list if none exist.
      */
     fun getAllInstances(className: String): List<ModelInstance> {
+        extents[className]?.let { return it }
         val subtypes = metamodel.metadata.classHierarchy[className] ?: return emptyList()
-        return instancesByName.values.filter { metamodel.classNameOf(it) in subtypes }
+        val matches = instancesByName.values.filter { metamodel.classNameOf(it) in subtypes }
+        extents[className] = matches
+        return matches
     }
 
     /**

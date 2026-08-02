@@ -2,6 +2,7 @@ import type { ValidationAcceptor, ValidationChecks, AstNode } from "langium";
 import type { ExtendedLangiumServices } from "@mdeo/language-common";
 import {
     EnumTypeReference,
+    MetaModel,
     PrimitiveType,
     Property,
     RangeMultiplicity,
@@ -25,7 +26,7 @@ import {
     type ListValueType
 } from "../grammar/modelTypes.js";
 import { BaseModelValidator } from "./baseModelValidator.js";
-import { resolveRelativeDocument, sharedImport } from "@mdeo/language-shared";
+import { climbsAboveProjectRoot, resolveRelativeDocument, sharedImport } from "@mdeo/language-shared";
 
 const { MultiMap, AstUtils } = sharedImport("langium");
 
@@ -93,7 +94,8 @@ export class ModelValidator extends BaseModelValidator {
     }
 
     /**
-     * Checks that the metamodel path in a `using` declaration resolves to an existing document.
+     * Checks that the metamodel path in a `using` declaration resolves to an existing document
+     * that actually holds a metamodel.
      */
     private validateMetamodelImport(model: ModelType, accept: ValidationAcceptor): void {
         const metamodelImport = model.import;
@@ -103,10 +105,28 @@ export class ModelValidator extends BaseModelValidator {
         }
 
         const document = AstUtils.getDocument(model);
+
+        if (climbsAboveProjectRoot(document, file)) {
+            accept("error", `Metamodel path '${file}' points outside the project.`, {
+                node: metamodelImport,
+                property: "file"
+            });
+            return;
+        }
+
         const targetDoc = resolveRelativeDocument(document, file, this.services.shared.workspace.LangiumDocuments);
 
         if (targetDoc == undefined) {
             accept("error", `Cannot resolve metamodel path '${file}'. The file does not exist or is not loaded.`, {
+                node: metamodelImport,
+                property: "file"
+            });
+            return;
+        }
+
+        const root = targetDoc.parseResult?.value;
+        if (root == undefined || root.$type !== MetaModel.name) {
+            accept("error", `The path '${file}' does not point to a metamodel file.`, {
                 node: metamodelImport,
                 property: "file"
             });

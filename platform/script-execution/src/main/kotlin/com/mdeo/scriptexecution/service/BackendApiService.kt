@@ -8,9 +8,11 @@ import com.mdeo.expression.ast.expressions.TypedExpression
 import com.mdeo.expression.ast.statements.TypedStatement
 import com.mdeo.script.ast.expressions.TypedExpressionSerializer
 import com.mdeo.script.ast.statements.TypedStatementSerializer
+import com.mdeo.execution.common.api.BACKEND_REQUEST_TIMEOUT_MS
 import io.ktor.client.*
 import io.ktor.client.call.*
 import io.ktor.client.engine.cio.*
+import io.ktor.client.plugins.*
 import io.ktor.client.plugins.contentnegotiation.*
 import io.ktor.client.request.*
 import io.ktor.http.*
@@ -40,6 +42,10 @@ class BackendApiService(private val baseUrl: String) {
                     contextual(TypedStatement::class, TypedStatementSerializer)
                 }
             })
+        }
+        install(HttpTimeout) {
+            requestTimeoutMillis = BACKEND_REQUEST_TIMEOUT_MS
+            socketTimeoutMillis = BACKEND_REQUEST_TIMEOUT_MS
         }
     }
 

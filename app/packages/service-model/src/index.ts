@@ -15,7 +15,7 @@ import {
     astHandler,
     AST_HANDLER_KEY
 } from "@mdeo/service-common";
-import type { ModelServices } from "@mdeo/language-model";
+import type { ModelServices, GeneratedModelServices } from "@mdeo/language-model";
 import type { LanguagePlugin } from "@mdeo/plugin";
 
 const modelLanguagePlugin: LanguagePlugin = {
@@ -33,17 +33,42 @@ const modelLanguagePlugin: LanguagePlugin = {
     },
     textualEditorPlugin: {
         languageConfiguration: defaultLanguageConfiguration,
+        // Only the base language's own keyword. Keywords for contributed imports
+        // (e.g. `import CSV from`) come from each contribution plugin's
+        // additionalKeywords and are merged in by the workbench.
         monarchTokensProvider: serializeMonarchTokensProvider({
             ...defaultMonarchTokenProvider,
-            keywords: ["using", "import", "CSV", "from"]
+            keywords: ["using"]
         })
     },
     isGenerated: false
 };
 
+/**
+ * Language plugin definition for the generated model language (.m_gen), e.g. optimizer solutions.
+ */
+const generatedModelLanguagePlugin: LanguagePlugin = {
+    id: "model_gen",
+    name: "Generated Model",
+    extension: ".m_gen",
+    newFileAction: false,
+    icon: convertIcon(BookOpen),
+    serverPlugin: {
+        import: "generatedLanguage.js"
+    },
+    graphicalEditorPlugin: {
+        import: "editor.js",
+        stylesUrl: "styles.css",
+        stylesCls: "editor-model"
+    },
+    textualEditorPlugin: undefined,
+    isGenerated: true
+};
+
 initializePluginContext();
 
 const { modelPluginProvider } = await import("@mdeo/language-model");
+const { generatedModelPluginProvider } = await import("@mdeo/language-model");
 const { modelDataHandler, MODEL_DATA_HANDLER_KEY } = await import("./handler/modelDataHandler.js");
 
 const envConfig = parseServiceConfigFromEnv();
@@ -51,9 +76,9 @@ const envConfig = parseServiceConfigFromEnv();
 const modelServicePlugin: ServicePluginDefinition = {
     id: "model-service",
     name: "Model",
-    description: "Language support for model definitions (.m files)",
+    description: "Language support for model definitions (.m and .m_gen files)",
     icon: convertIcon(BookOpen),
-    languagePlugins: [modelLanguagePlugin],
+    languagePlugins: [modelLanguagePlugin, generatedModelLanguagePlugin],
     contributionPlugins: []
 };
 
@@ -66,10 +91,18 @@ const modelLanguageConfig: LanguageServiceConfig<ModelServices> = {
     }
 };
 
-const config: ServiceConfig<ModelServices> = {
+const generatedModelLanguageConfig: LanguageServiceConfig<GeneratedModelServices> = {
+    languagePlugin: generatedModelLanguagePlugin,
+    languagePluginProvider: generatedModelPluginProvider,
+    fileDataHandlers: {
+        [AST_HANDLER_KEY]: astHandler
+    }
+};
+
+const config: ServiceConfig<any> = {
     ...envConfig,
     plugin: modelServicePlugin,
-    languages: [modelLanguageConfig]
+    languages: [modelLanguageConfig, generatedModelLanguageConfig]
 };
 
 await startLanguageService(config);

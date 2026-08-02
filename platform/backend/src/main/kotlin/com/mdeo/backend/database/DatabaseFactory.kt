@@ -48,6 +48,7 @@ object DatabaseFactory {
                 LanguagePluginsTable,
                 ContributionPluginsTable,
                 FileDataTable,
+                FileDataComputationsTable,
                 FileDependenciesTable,
                 DataDependenciesTable,
                 ExecutionsTable,

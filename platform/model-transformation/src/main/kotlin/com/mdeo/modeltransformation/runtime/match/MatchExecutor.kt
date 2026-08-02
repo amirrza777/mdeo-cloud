@@ -30,6 +30,13 @@ class MatchExecutor {
         const val DEFAULT_LIMIT = 1L
         /** Signals unlimited results (for foreach operations). */
         const val UNLIMITED = -1L
+
+        /**
+         * When this system property is set, every match plan is printed to stdout as a
+         * compact step summary. Used to inspect the join order chosen for a pattern when
+         * diagnosing slow transformations; it has no effect on execution.
+         */
+        const val DEBUG_PLAN_PROPERTY = "mdeo.debug.matchplan"
     }
 
     private val labelIdGenerator = SequentialLabelIdGenerator()
@@ -99,6 +106,7 @@ class MatchExecutor {
 
         val analyzer = MatchAnalyzer(context.variableScope)
         elements.variables.forEach { analyzer.analyzeVariable(it) }
+        elements.variableReassignments.forEach { analyzer.analyzeExpression(it.reassignment.value) }
         elements.whereClauses.forEach { analyzer.analyzeWhereClause(it) }
         (elements.matchableInstances + elements.createInstances + elements.deleteInstances)
             .forEach { analyzer.analyzeObjectInstance(it) }
@@ -110,7 +118,8 @@ class MatchExecutor {
         val allMatchable = elements.matchableInstances + elements.deleteInstances
         val matchableNames = allMatchable.map { it.objectInstance.name }.toSet()
 
-        val variableNames = elements.variables.map { it.variable.name }.toSet()
+        val variableNames = elements.variables.map { it.variable.name }.toSet() +
+            elements.variableReassignments.map { it.reassignment.name }.toSet()
         val nodeAnalyzer = ExpressionNodeAnalyzer(matchableNames + variableNames + referencedInstances, context.variableScope.scopeIndex)
 
         val matchPlan = MatchPlanBuilder(
@@ -122,8 +131,22 @@ class MatchExecutor {
             isCollectionExpression = { expr ->
                 expressionSupport.isCollectionType(expressionSupport.resolveExpressionType(expr))
             },
-            metamodelData = engine.metamodelData
+            metamodelData = engine.metamodelData,
+            statistics = engine.modelGraph.statistics
         ).build(elements, referencedInstances)
+
+        // Snapshot the declaring-scope bindings of reassigned variables. Building the
+        // traversal flips them to label bindings (so within-block accesses see the new
+        // value); on a successful match the extractor overwrites them with the computed
+        // value, but on a no-match nothing is extracted, so the originals must be restored.
+        val reassignSnapshots = elements.variableReassignments.mapNotNull { el ->
+            val name = el.reassignment.name
+            context.variableScope.findDeclaringScope(name)?.let { scope ->
+                Triple(name, scope, scope.getLocalBinding(name))
+            }
+        }
+
+        if (System.getProperty(DEBUG_PLAN_PROPERTY) != null) { printPlan(matchPlan) }
 
         val traversal = buildUnifiedTraversal(
             elements, matchPlan,
@@ -140,7 +163,48 @@ class MatchExecutor {
         val allSelectNames = (elements.allInstanceNames + planBoundNames).distinct()
 
         val matchedInstanceNames = allMatchable.map { it.objectInstance.name }
-        return executeTraversalAndExtract(traversal, elements, context, engine, matchedInstanceNames, allSelectNames)
+        val results = executeTraversalAndExtract(traversal, elements, context, engine, matchedInstanceNames, allSelectNames)
+        if (results.isEmpty()) {
+            for ((name, scope, original) in reassignSnapshots) {
+                if (original != null) scope.setBinding(name, original)
+            }
+        }
+        return results
+    }
+
+    /**
+     * Prints a one-line-per-step summary of [plan] to stdout.
+     *
+     * Only the structural shape is printed (scans, walks, conditions and filter kinds); the
+     * compiled expressions behind property and where constraints are omitted so that the
+     * join order stays readable.
+     *
+     * @param plan The plan to describe.
+     */
+    private fun printPlan(plan: MatchPlan) {
+        println("[match-plan] ${plan.baseSteps.size} steps")
+        for ((index, step) in plan.baseSteps.withIndex()) {
+            println("  ${index.toString().padStart(2)} ${describeStep(step)}")
+        }
+    }
+
+    /** Returns a compact, human-readable description of a single [step]. */
+    private fun describeStep(step: BaseStep): String = when (step) {
+        is BaseStep.VertexScan ->
+            "scan   ${step.instanceName}: ${step.className ?: "?"}${if (step.vertexId != null) " (bound)" else ""}"
+        is BaseStep.EdgeWalk ->
+            "walk   ${step.fromInstanceName} -> ${step.toInstanceName}: ${step.toClassName ?: "?"}" +
+                (if (step.isReversed) " (reversed)" else "")
+        is BaseStep.InlinePropertyConstraint ->
+            "prop   ${step.instanceName}.${step.property.propertyName}${if (step.isConstant) " (const)" else ""}"
+        is BaseStep.DeferredPropertyConstraint -> "prop*  ${step.instanceName}.${step.property.propertyName}"
+        is BaseStep.ApplicationCondition ->
+            "${if (step.isNegative) "forbid" else "require"} anchor=${step.anchorName ?: "-"} " +
+                "inner=[${step.innerSteps.joinToString("; ") { describeStep(it) }}]"
+        is BaseStep.EqualityFilter -> "eq     ${step.instanceName}"
+        is BaseStep.VariableBinding -> "var    ${step.variable.variable.name}"
+        is BaseStep.WhereFilter -> "where"
+        is BaseStep.InjectiveConstraint -> "neq    ${step.instanceNameA} != ${step.instanceNameB}"
     }
 
     /**
@@ -184,9 +248,17 @@ class MatchExecutor {
         }
         val allSelectNames = (elements.allInstanceNames + planBoundNames).distinct()
 
-        val variableLabels = elements.variables.map { VariableBinding.variableLabel(it.variable.name) }
+        val variableLabels = allVariableLabels(elements)
         return addSelectStep(t, allSelectNames, variableLabels)
     }
+
+    /**
+     * Returns the Gremlin step labels for all bound variables — both declarations and
+     * reassignments — that must be included in the final `select()` and result extraction.
+     */
+    private fun allVariableLabels(elements: PatternCategories): List<String> =
+        elements.variables.map { VariableBinding.variableLabel(it.variable.name) } +
+        elements.variableReassignments.map { VariableBinding.variableLabel(it.reassignment.name) }
 
     /**
      * Applies a `.limit()` step if [limit] is positive.
@@ -247,7 +319,7 @@ class MatchExecutor {
         allSelectNames: List<String>
     ): List<MatchResult.Matched> {
         val instanceNames = elements.allInstanceNames
-        val variableLabels = elements.variables.map { VariableBinding.variableLabel(it.variable.name) }
+        val variableLabels = allVariableLabels(elements)
         val allLabels = allSelectNames + variableLabels
 
         return traversal.toList().map { rawResult ->
@@ -288,6 +360,17 @@ class MatchExecutor {
             val value = result[VariableBinding.variableLabel(varName)]
             bindings[varName] = value
             context.variableScope.setBinding(varName, VariableBinding.ValueBinding(value))
+        }
+
+        // Reassignments write their computed value back to the scope where the variable was
+        // originally declared (not the current match scope), so the update survives the match
+        // scope and is observed by subsequent statements and loop iterations. They are not
+        // added to `bindings`, which would otherwise shadow the variable in the current scope.
+        for (reassignElement in elements.variableReassignments) {
+            val varName = reassignElement.reassignment.name
+            val value = result[VariableBinding.variableLabel(varName)]
+            val declaringScope = context.variableScope.findDeclaringScope(varName) ?: context.variableScope
+            declaringScope.setBinding(varName, VariableBinding.ValueBinding(value))
         }
 
         val instanceMappings = mutableMapOf<String, VertexRef>()

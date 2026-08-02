@@ -2,6 +2,7 @@ package com.mdeo.backend.service
 
 import com.mdeo.backend.database.DataDependenciesTable
 import com.mdeo.backend.database.FileDependenciesTable
+import com.mdeo.backend.database.FileDataComputationsTable
 import com.mdeo.backend.database.FileDataTable
 import com.mdeo.backend.database.FilesTable
 import com.mdeo.common.model.*
@@ -148,8 +149,12 @@ class FileDataService(services: InjectedServices) : BaseService(), InjectedServi
 
         val contributionPlugins = pluginService.getContributionPluginsForLanguage(projectId, languagePlugin.id)
 
+        // Recorded before the plugin is called so the token below is backed by a computation that is
+        // already visible to token verification, and removed again as soon as the call is done.
+        val computationId = beginComputation(projectId, normalizedPath, key)
+
         try {
-            val token = jwtService.generateProjectToken(projectId)
+            val token = jwtService.generateFileDataComputationToken(projectId, computationId)
 
             val computedData =
                 computeFromPlugin(pluginUrl, languagePlugin.id, key, projectId, fileSource, token, contributionPlugins)
@@ -183,6 +188,57 @@ class FileDataService(services: InjectedServices) : BaseService(), InjectedServi
                 ErrorCodes.FILE_DATA_COMPUTATION_FAILED,
                 "Failed to compute file data: ${e.message}"
             )
+        } finally {
+            endComputation(computationId)
+        }
+    }
+
+    /**
+     * Records a file data computation as running and returns its ID, which is what the token handed
+     * to the computing plugin is bound to.
+     *
+     * Also purges rows left behind by requests that died before they could clean up, so that a crash
+     * cannot keep a token alive for the rest of its lifetime.
+     *
+     * @param projectId The UUID of the project
+     * @param path The normalized path of the file being computed
+     * @param key The data key being computed
+     * @return The UUID of the recorded computation
+     */
+    private fun beginComputation(projectId: UUID, path: String, key: String): UUID {
+        val computationId = UUID.randomUUID()
+        val now = Instant.now()
+        val staleBefore = now.minusSeconds(fileDataConfig.computationTimeoutSeconds)
+
+        transaction {
+            FileDataComputationsTable.deleteWhere { startedAt less staleBefore }
+
+            FileDataComputationsTable.insert {
+                it[id] = computationId.toKotlinUuid()
+                it[FileDataComputationsTable.projectId] = projectId.toKotlinUuid()
+                it[FileDataComputationsTable.path] = path
+                it[dataKey] = key
+                it[startedAt] = now
+            }
+        }
+
+        return computationId
+    }
+
+    /**
+     * Marks a file data computation as finished, which stops its token from being accepted.
+     *
+     * @param computationId The UUID of the computation to clear
+     */
+    private fun endComputation(computationId: UUID) {
+        try {
+            transaction {
+                FileDataComputationsTable.deleteWhere { id eq computationId.toKotlinUuid() }
+            }
+        } catch (e: Exception) {
+            // The row is ignored once it is older than the computation timeout, so a failure here
+            // delays the token becoming unusable rather than leaving it valid indefinitely.
+            logger.warn("Failed to clear file data computation $computationId", e)
         }
     }
 
@@ -379,7 +435,7 @@ class FileDataService(services: InjectedServices) : BaseService(), InjectedServi
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer $token")
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                .timeout(Duration.ofMinutes(5))
+                .timeout(Duration.ofSeconds(fileDataConfig.computationTimeoutSeconds))
                 .build()
 
             val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
