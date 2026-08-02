@@ -2,6 +2,7 @@ package com.mdeo.modeltransformation.runtime.match.plan
 
 import com.mdeo.expression.ast.expressions.TypedExpression
 import com.mdeo.metamodel.data.MetamodelData
+import com.mdeo.modeltransformation.graph.ModelStatistics
 import com.mdeo.modeltransformation.ast.patterns.TypedPatternLinkElement
 import com.mdeo.modeltransformation.ast.patterns.TypedPatternObjectInstance
 import com.mdeo.modeltransformation.ast.patterns.TypedPatternObjectInstanceElement
@@ -65,6 +66,9 @@ internal data class PendingCondition(
  *           bound to distinct vertices, as computed by [computeInjectivePairs].
  * @property metamodelData The metamodel used for association lookups and BFS ordering
  *           inside application conditions.
+ * @property costModel Model-sensitive branching-factor estimates, or `null` when no
+ *           [com.mdeo.modeltransformation.graph.ModelStatistics] were supplied. When it is
+ *           `null` the planner falls back to purely structural step ordering.
  * @property getVertexId Function returning a pre-bound vertex ID for an instance name,
  *           or `null` if the instance must be found by graph traversal.
  * @property nodeAnalyzer Analyser that extracts the set of node names referenced by an
@@ -87,10 +91,23 @@ internal class MatchPlanGraph(
     val instancePriorities: Map<String, Int>,
     val injectivePairs: List<Pair<String, String>>,
     val metamodelData: MetamodelData,
+    private val statistics: ModelStatistics?,
     val getVertexId: (String) -> Any?,
     val nodeAnalyzer: ExpressionNodeAnalyzer,
     val isCollectionExpression: (TypedExpression) -> Boolean
 ) {
+    /**
+     * Model-sensitive cost estimates, or `null` when no statistics were supplied.
+     *
+     * Built on first use: a pattern with a single matchable instance has no ordering choice
+     * to make, and such patterns are common enough — and cheap enough to match — that
+     * constructing a cost model for them is measurable in a search that runs hundreds of
+     * thousands of mutations.
+     */
+    val costModel: MatchCostModel? by lazy {
+        statistics?.let { MatchCostModel(metamodelData, it, nodeAnalyzer, isCollectionExpression) }
+    }
+
     /** Fast lookup of an instance element by name; derived from [instances]. */
     val instanceMap: Map<String, TypedPatternObjectInstanceElement> =
         instances.associateBy { it.objectInstance.name }
@@ -251,6 +268,9 @@ internal class MatchPlanGraph(
          * @param isCollectionExpression Predicate returning `true` for collection-typed
          *        expressions.
          * @param metamodelData The metamodel used for DAG computation and BFS ordering.
+         * @param statistics Cardinality snapshot of the model being matched, or `null` when
+         *        no statistics are available. When present, a [MatchCostModel] is built from
+         *        it and the planner orders steps by estimated branching factor.
          * @return A fully populated [MatchPlanGraph] ready for consumption by
          *         [MatchPlanBuilder.PlanExecution].
          */
@@ -260,7 +280,8 @@ internal class MatchPlanGraph(
             getVertexId: (String) -> Any?,
             nodeAnalyzer: ExpressionNodeAnalyzer,
             isCollectionExpression: (TypedExpression) -> Boolean,
-            metamodelData: MetamodelData
+            metamodelData: MetamodelData,
+            statistics: ModelStatistics?
         ): MatchPlanGraph {
             val pseudoCompositionDag = MetamodelClassPriority.computePseudoCompositionDag(metamodelData)
             val instances = mergeInstancesByName(elements.matchableInstances + elements.deleteInstances)
@@ -298,6 +319,7 @@ internal class MatchPlanGraph(
                 instancePriorities = computeInstancePriorities(instances, elements.requireInstances, links, elements.requireLinks, pseudoCompositionDag),
                 injectivePairs = computeInjectivePairs(instances),
                 metamodelData = metamodelData,
+                statistics = statistics,
                 getVertexId = getVertexId,
                 nodeAnalyzer = nodeAnalyzer,
                 isCollectionExpression = isCollectionExpression

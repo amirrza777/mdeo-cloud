@@ -13,7 +13,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExecutorCoroutineDispatcher
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.withContext
-import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.cbor.Cbor
 import kotlinx.serialization.decodeFromByteArray
@@ -43,8 +42,10 @@ import kotlin.uuid.toKotlinUuid
  * directly; no WebSocket is established.
  *
  * @param workerThreads Number of blocking I/O threads per execution for subprocess communication.
- * @param scriptTimeoutMs Per-script-invocation timeout budget in milliseconds.
- * @param transformationTimeoutMs Transformation-step timeout budget in milliseconds.
+ * @param scriptTimeoutMs Per-script-invocation timeout budget in milliseconds, used when the
+ *        optimization config does not set `runtime.timeout.script`.
+ * @param transformationTimeoutMs Transformation-step timeout budget in milliseconds, used when
+ *        the optimization config does not set `runtime.timeout.transformation`.
  * @param serverPort The local HTTP/WS server port, used to build the subprocess WS URL.
  * @param subprocessPool Pool of reusable subprocess runners. Completed executions return
  *        their subprocesses to the pool (after a protocol-level reset) instead of destroying
@@ -78,6 +79,12 @@ class WorkerService(
      */
     private val localChannelPending =
         ConcurrentHashMap<String, CompletableDeferred<List<WorkerWsMessage>>>()
+
+    /**
+     * Progress reported by the subprocess for each in-flight local-channel request, which is what
+     * [sendViaLocalChannel] waits on instead of a deadline.
+     */
+    private val localChannelLiveness = RequestLiveness()
 
     /**
      * Returns metadata describing this worker node's local thread capacity and
@@ -118,10 +125,16 @@ class WorkerService(
     ): WorkerAllocationResponse {
         val effectiveThreads = minOf(request.threadsPerNode, workerThreads)
         val useLocalChannel = request.useLocalChannel
+        val effectiveScriptTimeoutMs =
+            request.timeout?.effectiveScriptTimeoutMs(scriptTimeoutMs) ?: scriptTimeoutMs
+        val effectiveTransformationTimeoutMs =
+            request.timeout?.effectiveTransformationTimeoutMs(transformationTimeoutMs) ?: transformationTimeoutMs
         logger.info(
-            "Allocating execution {} with {} initial solutions ({} threads, cap {}, wsMode={}, localChannel={})",
+            "Allocating execution {} with {} initial solutions ({} threads, cap {}, wsMode={}, " +
+                "localChannel={}, scriptTimeout={}ms, transformationTimeout={}ms)",
             request.executionId, request.initialSolutionCount, effectiveThreads,
-            request.threadsPerNode, orchestratorWsUrl != null, useLocalChannel
+            request.threadsPerNode, orchestratorWsUrl != null, useLocalChannel,
+            effectiveScriptTimeoutMs, effectiveTransformationTimeoutMs
         )
 
         val dispatcher = Executors.newFixedThreadPool(effectiveThreads).asCoroutineDispatcher()
@@ -150,8 +163,8 @@ class WorkerService(
             skipInitialization = false,
             orchestratorWsUrl = orchestratorWsUrl,
             useLocalChannel = useLocalChannel,
-            scriptTimeoutMs = scriptTimeoutMs,
-            transformationTimeoutMs = transformationTimeoutMs,
+            scriptTimeoutMs = effectiveScriptTimeoutMs,
+            transformationTimeoutMs = effectiveTransformationTimeoutMs,
             workerThreads = effectiveThreads,
             graphBackendType = request.graphBackendType
         )
@@ -351,8 +364,10 @@ class WorkerService(
      * @param msg The [WorkerWsMessage] to forward.
      * @return The list of response messages from the subprocess, or empty on subprocess death.
      */
-    internal suspend fun dispatchToSubprocess(executionId: String, msg: WorkerWsMessage): List<WorkerWsMessage> =
-        sendViaLocalChannel(requireExecution(executionId), msg)
+    internal suspend fun dispatchToSubprocess(
+        executionId: String,
+        msg: WorkerWsMessage
+    ): List<WorkerWsMessage> = sendViaLocalChannel(requireExecution(executionId), msg)
 
     /**
      * Sends [msg] to the subprocess via the local-channel mechanism and awaits all
@@ -363,6 +378,11 @@ class WorkerService(
      * pending [CompletableDeferred] in [localChannelPending] keyed by [msg.requestId], and
      * sends the channel message to the subprocess. The channel handler completes the
      * deferred when the matching [SubprocessChannelMessage.OrchestratorResponses] arrives.
+     *
+     * The wait has no deadline of its own. How long the subprocess may take is set by the
+     * watchdog budgets it was given, and duplicating that here would only mean guessing at them
+     * from the outside; instead this waits while the subprocess reports progress, and stops when
+     * it stops reporting.
      *
      * @param state The execution state (provides the [SubprocessRunner]).
      * @param msg The [WorkerWsMessage] to forward.
@@ -378,14 +398,19 @@ class WorkerService(
         )
         val deferred = CompletableDeferred<List<WorkerWsMessage>>()
         localChannelPending[msg.requestId] = deferred
-        state.runner.sendChannelMessage(channelMsgBytes)
+        localChannelLiveness.starting(msg.requestId)
         return try {
-            withTimeout(LOCAL_CHANNEL_TIMEOUT_MS) { deferred.await() }
-        } catch (_: Exception) {
-            logger.warn("Local-channel request {} for execution did not complete (subprocess may have died)", msg.requestId)
+            state.runner.sendChannelMessage(channelMsgBytes)
+            localChannelLiveness.awaitWhileAlive(msg.requestId, deferred)
+        } catch (e: Exception) {
+            logger.warn(
+                "Local-channel request {} for execution {} did not complete: {}",
+                msg.requestId, state.executionId, e.message
+            )
             emptyList()
         } finally {
             localChannelPending.remove(msg.requestId)
+            localChannelLiveness.finished(msg.requestId)
         }
     }
 
@@ -414,10 +439,13 @@ class WorkerService(
                         }
                     }
                     is SubprocessChannelMessage.OrchestratorNotice -> {
-                        val state = executions[executionId]
-                        val callback = state?.noticeCallback
-                        if (callback != null) {
-                            val notice = cbor.decodeFromByteArray<WorkerWsMessage>(msg.payload)
+                        val notice = cbor.decodeFromByteArray<WorkerWsMessage>(msg.payload)
+                        val callback = executions[executionId]?.noticeCallback
+                        if (notice is WorkerHeartbeat) {
+                            // Consumed here rather than forwarded: this keeps the wait in
+                            // sendViaLocalChannel alive, it is not something a client acts on.
+                            localChannelLiveness.signal(notice.requestId)
+                        } else if (callback != null) {
                             callback(notice)
                         } else {
                             logger.warn(
@@ -587,12 +615,6 @@ class WorkerService(
          * Interval between cancellation checks in the subprocess runner's polling thread.
          */
         private const val CANCELLATION_CHECK_INTERVAL_MS = 5000L
-
-        /**
-         * Timeout for local-channel request/response round-trips.
-         * Matches the WebSocket operation timeout in [WorkerClient].
-         */
-        const val LOCAL_CHANNEL_TIMEOUT_MS = 600_000L
 
         /**
          * Builds the default [SubprocessPool] for worker executions.

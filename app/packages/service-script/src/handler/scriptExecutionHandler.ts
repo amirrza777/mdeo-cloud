@@ -4,7 +4,7 @@ import type {
     ExecutionRequestContext,
     CanHandleResult,
     ExecuteResponse,
-    FileEntry
+    ExecutionResultEntry
 } from "@mdeo/service-common";
 
 /**
@@ -198,7 +198,7 @@ export class ScriptExecutionHandler implements ExecutionHandler<ExecuteResponse>
      *
      * @returns Promise resolving to an empty list
      */
-    async getFileTree(_context: ExecutionRequestContext): Promise<FileEntry[]> {
+    async getFileTree(_context: ExecutionRequestContext): Promise<ExecutionResultEntry[]> {
         return [];
     }
 

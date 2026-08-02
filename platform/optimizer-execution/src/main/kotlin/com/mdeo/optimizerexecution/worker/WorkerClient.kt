@@ -22,10 +22,6 @@ import java.util.UUID
 @OptIn(ExperimentalSerializationApi::class)
 abstract class WorkerClient(val nodeId: String, val baseUrl: String) : AutoCloseable {
 
-    companion object {
-        const val OPERATION_TIMEOUT_MS = 600_000L
-    }
-
     private val logger = LoggerFactory.getLogger(WorkerClient::class.java)
 
     /**
@@ -71,14 +67,15 @@ abstract class WorkerClient(val nodeId: String, val baseUrl: String) : AutoClose
     /**
      * Sends [msg] and suspends until the matching response arrives.
      *
+     * There is no deadline: how long a request may take is a property of the work in it, which
+     * the worker's own watchdog governs. Implementations wait while the worker reports progress
+     * and fail once it stops, so that work of any length completes and a worker that has stopped
+     * answering is still noticed.
+     *
      * @param msg The message to send.
-     * @param timeoutMs Maximum time to wait for a response.
      * @return The response message.
      */
-    protected abstract suspend fun sendAndReceive(
-        msg: WorkerWsMessage,
-        timeoutMs: Long = OPERATION_TIMEOUT_MS
-    ): WorkerWsMessage
+    protected abstract suspend fun sendAndReceive(msg: WorkerWsMessage): WorkerWsMessage
 
     /**
      * Sends a unified work batch to the worker.

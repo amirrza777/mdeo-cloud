@@ -187,6 +187,25 @@ data class WorkerShutdownAck(
 ) : WorkerWsMessage()
 
 /**
+ * Worker → Orchestrator: the worker is still working on the request with this id.
+ *
+ * Emitted at a fixed interval for as long as a request is being processed, and consumed
+ * without a reply. It is what lets the orchestrator wait for work of any length without
+ * guessing how long that work should take: it waits while the beats keep arriving, and gives
+ * up when they stop. A worker that dies is noticed sooner, by its connection closing; this
+ * covers a worker that is alive but no longer working on what it was asked for, which nothing
+ * else reports.
+ *
+ * @param requestId The request being worked on.
+ */
+@OptIn(ExperimentalSerializationApi::class)
+@Serializable
+@SerialName("worker_heartbeat")
+data class WorkerHeartbeat(
+    override val requestId: String
+) : WorkerWsMessage()
+
+/**
  * Orchestrator → Worker: push solution model data for rebalanced solutions.
  *
  * Sent by the orchestrator before dispatching a [NodeWorkBatchRequest] that contains

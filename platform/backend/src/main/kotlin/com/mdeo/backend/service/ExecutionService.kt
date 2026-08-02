@@ -4,10 +4,12 @@ import com.mdeo.common.model.ExecutionState
 import com.mdeo.backend.database.ExecutionsTable
 import com.mdeo.backend.database.FilesTable
 import com.mdeo.common.model.*
+import com.mdeo.common.transport.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.decodeFromJsonElement
 import kotlinx.serialization.json.JsonObject
 import org.jetbrains.exposed.v1.jdbc.*
 import org.jetbrains.exposed.v1.core.*
@@ -40,6 +42,17 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
             .version(if (config.plugin.forceHttp1) HttpClient.Version.HTTP_1_1 else HttpClient.Version.HTTP_2)
             .build()
     }
+
+    /**
+     * Connections to plugin services for reading execution results.
+     *
+     * Result reads are the one plugin interaction that happens in bursts — opening a
+     * completed run asks for a tree and then a file at a time — and each one used to be its
+     * own HTTP request across two further hops. These connections are held open across such
+     * a burst and dropped again once the user moves on. Each request still carries the token
+     * that authorizes it, so a dropped connection costs nothing but a reconnect.
+     */
+    private val executionWsClient by lazy { ExecutionWsClient() }
 
     companion object {
         /**
@@ -573,6 +586,114 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
     }
 
     /**
+     * Reads a whole execution result set in one request to the plugin, reporting each file
+     * as it arrives.
+     *
+     * This is what makes opening a completed execution cheap. Reading the results a file at
+     * a time cost a request per file at every hop between the browser and the service that
+     * stores them; this asks once and lets the answer stream back, so the caller can hand
+     * files to the user as they land rather than after the last one.
+     *
+     * If the plugin does not serve the WebSocket endpoint, the tree and each file are fetched
+     * over HTTP instead — the caller still makes a single request, and only the hops below
+     * this one lose the saving.
+     *
+     * @param projectId The UUID of the project
+     * @param executionId The UUID of the execution
+     * @param paths Files to read, or null for every file in the result tree
+     * @param onFile Invoked with each file's path and text content as it arrives
+     * @return The entries that were read, or an error
+     */
+    suspend fun streamExecutionFiles(
+        projectId: UUID,
+        executionId: UUID,
+        paths: List<String>?,
+        onFile: suspend (path: String, content: String) -> Unit
+    ): ApiResult<List<FileEntry>> {
+        val executionResult = getExecution(projectId, executionId)
+        if (executionResult is ApiResult.Failure) {
+            return ApiResult.Failure(executionResult.error)
+        }
+
+        val execution = (executionResult as ApiResult.Success).value
+        val pluginUrl = getPluginUrlForExecution(execution)
+            ?: return executionFailure(ErrorCodes.PLUGIN_NOT_FOUND, "Plugin not found for execution")
+
+        return try {
+            val response = pluginWsRequest(
+                pluginUrl,
+                JwtService.SCOPE_PLUGIN_EXECUTION_READ,
+                executionId,
+                projectId,
+                { token ->
+                    ExecutionFilesWsRequest(
+                        "",
+                        wsContext(executionId, projectId, execution.languageId, execution.metadata, token),
+                        paths
+                    )
+                },
+                { message ->
+                    if (message is ExecutionFileDataMessage) {
+                        onFile(message.path, message.content)
+                    }
+                }
+            )
+
+            if (response != null) {
+                success(decodePayload<ExecutionFileTreePayload>(response.data).files)
+            } else {
+                success(streamExecutionFilesOverHttp(pluginUrl, execution, executionId, projectId, paths, onFile))
+            }
+        } catch (e: Exception) {
+            logger.error("Failed to load execution files from plugin $pluginUrl for execution $executionId", e)
+            executionFailure(ErrorCodes.EXECUTION_PLUGIN_ERROR, "Failed to load execution files: ${e.message}")
+        }
+    }
+
+    /**
+     * Fallback for [streamExecutionFiles] against a plugin without the WebSocket endpoint.
+     *
+     * A file that cannot be read is skipped rather than failing the whole load: a partially
+     * readable result set is still worth showing, and the tree the caller receives back tells
+     * it exactly which files it did not get.
+     */
+    private suspend fun streamExecutionFilesOverHttp(
+        pluginUrl: String,
+        execution: Execution,
+        executionId: UUID,
+        projectId: UUID,
+        paths: List<String>?,
+        onFile: suspend (path: String, content: String) -> Unit
+    ): List<FileEntry> {
+        val tree = callPluginGetFileTreeHttp(
+            pluginUrl, execution.languageId, executionId, projectId, execution.metadata
+        )
+        val requested = paths?.toSet()
+        val sent = mutableListOf<FileEntry>()
+
+        for (entry in tree) {
+            if (entry.type != FileType.FILE) {
+                sent.add(entry)
+                continue
+            }
+            if (requested != null && entry.name !in requested) {
+                continue
+            }
+            try {
+                val content = callPluginGetFileHttp(
+                    pluginUrl, execution.languageId, executionId, projectId, entry.name, execution.metadata
+                )
+                onFile(entry.name, String(content, Charsets.UTF_8))
+                sent.add(entry)
+            } catch (e: Exception) {
+                logger.warn("Skipping unreadable execution file ${entry.name}: ${e.message}")
+            }
+        }
+
+        return sent
+    }
+
+    /**
      * Cancels an execution by forwarding to the plugin.
      *
      * @param projectId The UUID of the project
@@ -790,8 +911,16 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
         contributionPlugins: List<JsonElement>
     ): CreateExecutionResponse {
         return withContext(Dispatchers.IO) {
-            val token =
-                jwtService.generateExecutionToken(projectId, executionId, listOf(JwtService.SCOPE_EXECUTION_WRITE))
+            // The execution node keeps this token for the entire run and reports progress and the
+            // terminal state with it, so it gets the longer execution lifetime rather than the
+            // general (request-scoped) one. Being bound to the execution keeps that lifetime from
+            // outliving the run: the update that reports the terminal state is the last request the
+            // token is accepted for.
+            val token = jwtService.generateExecutionRunToken(
+                projectId,
+                executionId,
+                ttlSeconds = config.jwt.executionExpirationSeconds
+            )
             val requestBody = json.encodeToString(
                 PluginCreateExecutionRequest.serializer(),
                 PluginCreateExecutionRequest(
@@ -811,7 +940,10 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
                 .header("Content-Type", "application/json")
                 .header("Authorization", "Bearer $token")
                 .POST(HttpRequest.BodyPublishers.ofString(requestBody))
-                .timeout(Duration.ofMinutes(1))
+                // Starting an execution can require the plugin to have file data computed first,
+                // which for a large model takes minutes, so this must not give up before a single
+                // computation would have been abandoned anyway.
+                .timeout(Duration.ofSeconds(config.fileData.computationTimeoutSeconds))
                 .build()
 
             val response = httpClient.send(request, HttpResponse.BodyHandlers.ofString())
@@ -840,11 +972,27 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
         projectId: UUID,
         metadata: JsonObject?
     ): List<FileEntry> {
+        val overWs = pluginWsRequest(pluginUrl, JwtService.SCOPE_PLUGIN_EXECUTION_READ, executionId, projectId, build = { token ->
+            ExecutionFileTreeWsRequest("", wsContext(executionId, projectId, languageId, metadata, token))
+        })
+        if (overWs != null) {
+            return decodePayload<ExecutionFileTreePayload>(overWs.data).files
+        }
+        return callPluginGetFileTreeHttp(pluginUrl, languageId, executionId, projectId, metadata)
+    }
+
+    private suspend fun callPluginGetFileTreeHttp(
+        pluginUrl: String,
+        languageId: String,
+        executionId: UUID,
+        projectId: UUID,
+        metadata: JsonObject?
+    ): List<FileEntry> {
         return withContext(Dispatchers.IO) {
-            val token = jwtService.generateExecutionToken(
+            val token = jwtService.generatePluginExecutionToken(
                 projectId,
                 executionId,
-                listOf(JwtService.SCOPE_PLUGIN_EXECUTION_READ)
+                JwtService.SCOPE_PLUGIN_EXECUTION_READ
             )
             val uri = URI.create(pluginUrl).resolve("$languageId/executions/$executionId/files")
 
@@ -882,11 +1030,27 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
         projectId: UUID,
         metadata: JsonObject?
     ): String {
+        val overWs = pluginWsRequest(pluginUrl, JwtService.SCOPE_PLUGIN_EXECUTION_READ, executionId, projectId, build = { token ->
+            ExecutionSummaryWsRequest("", wsContext(executionId, projectId, languageId, metadata, token))
+        })
+        if (overWs != null) {
+            return decodePayload<ExecutionSummaryPayload>(overWs.data).summary
+        }
+        return callPluginGetSummaryHttp(pluginUrl, languageId, executionId, projectId, metadata)
+    }
+
+    private suspend fun callPluginGetSummaryHttp(
+        pluginUrl: String,
+        languageId: String,
+        executionId: UUID,
+        projectId: UUID,
+        metadata: JsonObject?
+    ): String {
         return withContext(Dispatchers.IO) {
-            val token = jwtService.generateExecutionToken(
+            val token = jwtService.generatePluginExecutionToken(
                 projectId,
                 executionId,
-                listOf(JwtService.SCOPE_PLUGIN_EXECUTION_READ)
+                JwtService.SCOPE_PLUGIN_EXECUTION_READ
             )
             val uri = URI.create(pluginUrl).resolve("$languageId/executions/$executionId/summary")
 
@@ -926,11 +1090,28 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
         path: String,
         metadata: JsonObject?
     ): ByteArray {
+        val overWs = pluginWsRequest(pluginUrl, JwtService.SCOPE_PLUGIN_EXECUTION_READ, executionId, projectId, build = { token ->
+            ExecutionFileWsRequest("", wsContext(executionId, projectId, languageId, metadata, token), normalizePath(path))
+        })
+        if (overWs != null) {
+            return decodePayload<ExecutionFilePayload>(overWs.data).content.toByteArray(Charsets.UTF_8)
+        }
+        return callPluginGetFileHttp(pluginUrl, languageId, executionId, projectId, path, metadata)
+    }
+
+    private suspend fun callPluginGetFileHttp(
+        pluginUrl: String,
+        languageId: String,
+        executionId: UUID,
+        projectId: UUID,
+        path: String,
+        metadata: JsonObject?
+    ): ByteArray {
         return withContext(Dispatchers.IO) {
-            val token = jwtService.generateExecutionToken(
+            val token = jwtService.generatePluginExecutionToken(
                 projectId,
                 executionId,
-                listOf(JwtService.SCOPE_PLUGIN_EXECUTION_READ)
+                JwtService.SCOPE_PLUGIN_EXECUTION_READ
             )
             val normalizedPath = normalizePath(path)
             val uri = URI.create(pluginUrl).resolve("$languageId/executions/$executionId/files/$normalizedPath")
@@ -969,11 +1150,30 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
         projectId: UUID,
         metadata: JsonObject?
     ) {
+        val overWs = pluginWsRequest(
+            pluginUrl, JwtService.SCOPE_PLUGIN_EXECUTION_CANCEL, executionId, projectId,
+            build = { token ->
+                ExecutionCancelWsRequest("", wsContext(executionId, projectId, languageId, metadata, token))
+            }
+        )
+        if (overWs != null) {
+            return
+        }
+        callPluginCancelHttp(pluginUrl, languageId, executionId, projectId, metadata)
+    }
+
+    private suspend fun callPluginCancelHttp(
+        pluginUrl: String,
+        languageId: String,
+        executionId: UUID,
+        projectId: UUID,
+        metadata: JsonObject?
+    ) {
         withContext(Dispatchers.IO) {
-            val token = jwtService.generateExecutionToken(
+            val token = jwtService.generatePluginExecutionToken(
                 projectId,
                 executionId,
-                listOf(JwtService.SCOPE_PLUGIN_EXECUTION_CANCEL)
+                JwtService.SCOPE_PLUGIN_EXECUTION_CANCEL
             )
             val uri = URI.create(pluginUrl).resolve("$languageId/executions/$executionId/cancel")
 
@@ -1009,11 +1209,38 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
         projectId: UUID,
         metadata: JsonObject?
     ) {
+        val overWs = try {
+            pluginWsRequest(
+                pluginUrl, JwtService.SCOPE_PLUGIN_EXECUTION_DELETE, executionId, projectId,
+                build = { token ->
+                    ExecutionDeleteWsRequest("", wsContext(executionId, projectId, languageId, metadata, token))
+                }
+            )
+        } catch (e: ExecutionWsException) {
+            if (e.code == ExecutionWsErrorCodes.NOT_FOUND) {
+                logger.warn("Plugin reports execution $executionId as unknown when deleting; assuming already deleted")
+                return
+            }
+            throw e
+        }
+        if (overWs != null) {
+            return
+        }
+        callPluginDeleteHttp(pluginUrl, languageId, executionId, projectId, metadata)
+    }
+
+    private suspend fun callPluginDeleteHttp(
+        pluginUrl: String,
+        languageId: String,
+        executionId: UUID,
+        projectId: UUID,
+        metadata: JsonObject?
+    ) {
         withContext(Dispatchers.IO) {
-            val token = jwtService.generateExecutionToken(
+            val token = jwtService.generatePluginExecutionToken(
                 projectId,
                 executionId,
-                listOf(JwtService.SCOPE_PLUGIN_EXECUTION_DELETE)
+                JwtService.SCOPE_PLUGIN_EXECUTION_DELETE
             )
             val uri = URI.create(pluginUrl).resolve("$languageId/executions/$executionId")
 
@@ -1036,6 +1263,91 @@ class ExecutionService(services: InjectedServices) : BaseService(), InjectedServ
                 throw RuntimeException("Plugin returned status ${response.statusCode()}: ${response.body()}")
             }
         }
+    }
+
+    /**
+     * Performs a plugin request over the pooled WebSocket connection, or reports that the
+     * plugin does not serve one.
+     *
+     * A plugin service that predates the WebSocket endpoint, or one that is momentarily
+     * unreachable on it, must not make results unreadable — every caller falls back to the
+     * HTTP route it used before. Errors the plugin itself raises are not fallback material
+     * and propagate.
+     *
+     * @param pluginUrl Base URL of the plugin service
+     * @param scope Scope the generated token must carry
+     * @param executionId The execution being addressed
+     * @param projectId The owning project
+     * @param build Builds the request; the request id it is given is replaced by the client
+     * @param onStream Invoked for each intermediate message of a streaming request
+     * @return The response, or null if the plugin could not be reached over WebSocket
+     */
+    private suspend fun pluginWsRequest(
+        pluginUrl: String,
+        scope: String,
+        executionId: UUID,
+        projectId: UUID,
+        build: (token: String) -> ExecutionWsMessage,
+        onStream: (suspend (ExecutionWsMessage) -> Unit)? = null
+    ): ExecutionWsResponse? {
+        val token = jwtService.generatePluginExecutionToken(projectId, executionId, scope)
+        return try {
+            executionWsClient.request(
+                pluginUrl,
+                { requestId -> build(token).withRequestId(requestId) },
+                onStream
+            )
+        } catch (e: ExecutionWsException) {
+            if (e.code != ExecutionWsErrorCodes.UNAVAILABLE) {
+                // The plugin answered, and said no. That is a real result, not a reason to ask
+                // again over HTTP — the code travels with the exception so callers that treat
+                // some failures as expected can still recognise them.
+                logger.warn(
+                    "Plugin WS request to {} for execution {} failed with {}: {}",
+                    pluginUrl, executionId, e.code, e.message
+                )
+                throw e
+            }
+            logger.warn("Plugin at {} unreachable over WebSocket, falling back to HTTP: {}", pluginUrl, e.message)
+            null
+        }
+    }
+
+    /**
+     * Builds the request context sent to a plugin service.
+     */
+    private fun wsContext(
+        executionId: UUID,
+        projectId: UUID,
+        languageId: String,
+        metadata: JsonObject?,
+        token: String
+    ): ExecutionWsContext = ExecutionWsContext(
+        executionId = executionId.toString(),
+        auth = token,
+        projectId = projectId.toString(),
+        languageId = languageId,
+        metadata = metadata
+    )
+
+    private inline fun <reified T> decodePayload(data: JsonElement?): T {
+        if (data == null) {
+            throw RuntimeException("Plugin returned an empty payload")
+        }
+        return ExecutionWsProtocol.json.decodeFromJsonElement(data)
+    }
+
+    /**
+     * Copies a request with the request id the connection assigned it.
+     */
+    private fun ExecutionWsMessage.withRequestId(requestId: String): ExecutionWsMessage = when (this) {
+        is ExecutionSummaryWsRequest -> copy(requestId = requestId)
+        is ExecutionFileTreeWsRequest -> copy(requestId = requestId)
+        is ExecutionFileWsRequest -> copy(requestId = requestId)
+        is ExecutionFilesWsRequest -> copy(requestId = requestId)
+        is ExecutionCancelWsRequest -> copy(requestId = requestId)
+        is ExecutionDeleteWsRequest -> copy(requestId = requestId)
+        else -> this
     }
 
     /**

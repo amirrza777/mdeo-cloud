@@ -4,6 +4,7 @@ import com.mdeo.metamodel.data.MetamodelData
 import com.mdeo.metamodel.data.ModelData
 import com.mdeo.optimizer.config.GoalConfig
 import com.mdeo.optimizer.config.GraphBackendType
+import com.mdeo.optimizer.config.RuntimeConfig
 import com.mdeo.optimizer.config.SolverConfig
 import com.mdeo.optimizer.evaluation.ResultStatus
 import kotlinx.serialization.Serializable
@@ -36,6 +37,9 @@ import kotlinx.serialization.Serializable
  *        communicate with the orchestrator instead of opening a WebSocket connection.
  *        More efficient for the local node where subprocess and orchestrator share a host.
  *        Mutually exclusive with [orchestratorWsUrl].
+ * @param timeout Per-evaluation timeouts from the optimization config, or `null` to let each
+ *        worker node apply its own environment defaults. Sent as configured rather than resolved
+ *        here, because the fallback belongs to the node that runs the evaluation.
  */
 @Serializable
 data class WorkerAllocationRequest(
@@ -50,7 +54,8 @@ data class WorkerAllocationRequest(
     val threadsPerNode: Int,
     val orchestratorWsUrl: String? = null,
     val useLocalChannel: Boolean = false,
-    val graphBackendType: GraphBackendType = GraphBackendType.MDEO
+    val graphBackendType: GraphBackendType = GraphBackendType.MDEO,
+    val timeout: RuntimeConfig.TimeoutConfig? = null
 )
 
 /**

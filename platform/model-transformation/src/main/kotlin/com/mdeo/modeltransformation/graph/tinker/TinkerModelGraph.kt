@@ -4,8 +4,10 @@ import com.mdeo.metamodel.Metamodel
 import com.mdeo.metamodel.SerializedModel
 import com.mdeo.metamodel.data.MetamodelData
 import com.mdeo.metamodel.data.ModelData
+import com.mdeo.modeltransformation.graph.GraphStatisticsCache
 import com.mdeo.modeltransformation.graph.ModelGraph
 import com.mdeo.modeltransformation.graph.ModelMetadata
+import com.mdeo.modeltransformation.graph.ModelStatistics
 import com.mdeo.modeltransformation.graph.VertexRef
 import com.mdeo.modeltransformation.runtime.InstanceNameRegistry
 import org.apache.tinkerpop.gremlin.process.traversal.TraversalStrategies
@@ -52,6 +54,11 @@ class TinkerModelGraph private constructor(
 
     override var metadata: ModelMetadata? = null
 
+    private val statisticsCache = GraphStatisticsCache({ graph }, { graph.verticesCount })
+
+    override val statistics: ModelStatistics
+        get() = statisticsCache.get()
+
     override fun createVertexRef(rawId: Any): VertexRef {
         val ref = VertexRef(rawId)
         trackedRefs.add(WeakReference(ref))
@@ -72,6 +79,9 @@ class TinkerModelGraph private constructor(
         val (newGraph, newRegistry) = copyGraphShuffled()
         return TinkerModelGraph(newGraph, metamodel, newRegistry, metamodelPath).also {
             it.metadata = metadata?.deepCopy()
+            // The copy has identical statistics, so it can start from this graph's snapshot
+            // instead of paying for its own O(V + E) pass on first use.
+            it.statisticsCache.seedFrom(statisticsCache)
         }
     }
 

@@ -1,6 +1,7 @@
 package com.mdeo.execution.common.routes
 
 import com.mdeo.execution.common.auth.*
+import com.mdeo.execution.common.config.ExecutionWsVerifierKey
 import com.mdeo.execution.common.service.ExecutionScopes
 import com.mdeo.execution.common.service.ExecutionService
 import com.mdeo.execution.common.service.ExecutionServiceWithFileTree
@@ -38,6 +39,8 @@ fun Route.baseExecutionRoutes(
             getSummaryRoute(logger, executionService)
         }
     }
+
+    registerExecutionWebSocketRoutes(executionService)
 }
 
 /**
@@ -62,6 +65,19 @@ fun Route.executionRoutesWithFileTree(
             getFileContentsRoute(logger, executionService)
         }
     }
+
+    registerExecutionWebSocketRoutes(executionService)
+}
+
+/**
+ * Registers the WebSocket counterpart of these routes, if the service enabled the transport
+ * with `configureExecutionTransport`.
+ *
+ * @param executionService The execution service to serve requests from
+ */
+private fun Route.registerExecutionWebSocketRoutes(executionService: ExecutionService) {
+    val verifier = application.attributes.getOrNull(ExecutionWsVerifierKey) ?: return
+    executionWebSocketRoutes(verifier, executionService)
 }
 
 private fun Route.cancelExecutionRoute(

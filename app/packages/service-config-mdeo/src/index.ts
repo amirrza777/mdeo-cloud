@@ -7,6 +7,7 @@ import {
     CONFIG_EXECUTION_GET_SUMMARY_REQUEST_KEY,
     CONFIG_EXECUTION_GET_FILE_TREE_REQUEST_KEY,
     CONFIG_EXECUTION_GET_FILE_REQUEST_KEY,
+    CONFIG_EXECUTION_GET_FILES_REQUEST_KEY,
     CONFIG_EXECUTION_CANCEL_REQUEST_KEY,
     CONFIG_EXECUTION_DELETE_REQUEST_KEY
 } from "@mdeo/service-config-common";
@@ -52,6 +53,7 @@ const {
     mdeoExecutionGetSummaryRequestHandler,
     mdeoExecutionGetFileTreeRequestHandler,
     mdeoExecutionGetFileRequestHandler,
+    mdeoExecutionGetFilesRequestHandler,
     mdeoExecutionCancelRequestHandler,
     mdeoExecutionDeleteRequestHandler
 } = await import("./handler/mdeoExecutionRequestHandler.js");
@@ -119,6 +121,7 @@ const configMdeoLanguageConfig: LanguageServiceConfig<MdeoServices> = {
         [CONFIG_EXECUTION_GET_SUMMARY_REQUEST_KEY]: mdeoExecutionGetSummaryRequestHandler,
         [CONFIG_EXECUTION_GET_FILE_TREE_REQUEST_KEY]: mdeoExecutionGetFileTreeRequestHandler,
         [CONFIG_EXECUTION_GET_FILE_REQUEST_KEY]: mdeoExecutionGetFileRequestHandler,
+        [CONFIG_EXECUTION_GET_FILES_REQUEST_KEY]: mdeoExecutionGetFilesRequestHandler,
         [CONFIG_EXECUTION_CANCEL_REQUEST_KEY]: mdeoExecutionCancelRequestHandler,
         [CONFIG_EXECUTION_DELETE_REQUEST_KEY]: mdeoExecutionDeleteRequestHandler
     }
