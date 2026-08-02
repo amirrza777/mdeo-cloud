@@ -11,6 +11,7 @@ import {
     AST_HANDLER_KEY,
     startLanguageService
 } from "@mdeo/service-common";
+import { MODEL_PLUGIN_REQUEST_KEY } from "@mdeo/service-model-common";
 import type { LanguagePlugin } from "@mdeo/plugin";
 
 const icon = convertIcon(Table);
@@ -36,6 +37,7 @@ const modelCsvLanguagePlugin: LanguagePlugin = {
 initializePluginContext();
 
 const { modelCsvPluginProvider, createModelCsvContributionPlugin } = await import("@mdeo/language-model-csv");
+const { csvImportRequestHandler } = await import("./handler/csvImportRequestHandler.js");
 
 /**
  * Plugin definition for the model-csv service.
@@ -66,6 +68,9 @@ const modelCsvLanguageConfig: LanguageServiceConfig<ModelCsvServices> = {
     languagePluginProvider: modelCsvPluginProvider,
     fileDataHandlers: {
         [AST_HANDLER_KEY]: astHandler
+    },
+    requestHandlers: {
+        [MODEL_PLUGIN_REQUEST_KEY]: csvImportRequestHandler
     }
 };
 

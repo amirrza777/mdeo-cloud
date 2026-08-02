@@ -6,29 +6,18 @@
     },
     "references": [
         {
-            "path": "../language-common"
+            "path": "../plugin"
         },
         {
-            "path": "../language-shared"
+            "path": "../language-common"
         },
         {
             "path": "../language-model"
         },
         {
-            "path": "../plugin"
-        },
-        {
             "path": "../service-common"
-        },
-        {
-            "path": "../service-model-common"
         }
     ],
-    "include": [
-        "src/**/*.ts"
-    ],
-    "exclude": [
-        "dist",
-        "node_modules"
-    ]
+    "include": ["src/**/*.ts"],
+    "exclude": ["dist", "node_modules"]
 }

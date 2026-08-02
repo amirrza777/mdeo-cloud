@@ -10,7 +10,8 @@
         { "path": "../language-model" },
         { "path": "../language-model-csv" },
         { "path": "../language-shared" },
-        { "path": "../service-common" }
+        { "path": "../service-common" },
+        { "path": "../service-model-common" }
     ],
     "include": ["src/**/*.ts"],
     "exclude": ["dist", "node_modules"]
