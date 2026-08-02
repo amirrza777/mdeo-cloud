@@ -3,6 +3,7 @@ import {
     CONFIG_EXECUTION_GET_SUMMARY_REQUEST_KEY,
     CONFIG_EXECUTION_GET_FILE_TREE_REQUEST_KEY,
     CONFIG_EXECUTION_GET_FILE_REQUEST_KEY,
+    CONFIG_EXECUTION_GET_FILES_REQUEST_KEY,
     CONFIG_EXECUTION_CANCEL_REQUEST_KEY,
     CONFIG_EXECUTION_DELETE_REQUEST_KEY
 } from "@mdeo/service-config-common";
@@ -10,7 +11,9 @@ import type {
     ConfigExecutionPluginRequestBody,
     ConfigExecutionRoutingMetadata,
     ConfigExecutionFollowUpRequestBody,
-    ConfigExecutionFileRequestBody
+    ConfigExecutionFileRequestBody,
+    ConfigExecutionFilesRequestBody,
+    ConfigExecutionFilesResponse
 } from "@mdeo/service-config-common";
 import { ConfigContributionPlugin, getWrapperInterfaceName } from "@mdeo/language-config";
 import type { ConfigType } from "@mdeo/language-config";
@@ -20,7 +23,7 @@ import type {
     ExecutionRequestContext,
     CanHandleResult,
     ExecuteResponse,
-    FileEntry
+    ExecutionResultEntry
 } from "@mdeo/service-common";
 import type { ServerContributionPlugin } from "@mdeo/plugin";
 import { URI } from "vscode-uri";
@@ -103,7 +106,7 @@ export class ConfigExecutionHandler implements ExecutionHandler<ExecuteResponse>
         return typeof result === "string" ? result : "";
     }
 
-    async getFileTree(context: ExecutionRequestContext): Promise<FileEntry[]> {
+    async getFileTree(context: ExecutionRequestContext): Promise<ExecutionResultEntry[]> {
         const routing = this.getRoutingMetadata(context);
         const requestBody: ConfigExecutionFollowUpRequestBody = {
             executionId: context.executionId
@@ -114,7 +117,7 @@ export class ConfigExecutionHandler implements ExecutionHandler<ExecuteResponse>
             requestBody
         );
 
-        return Array.isArray(result) ? (result as FileEntry[]) : [];
+        return Array.isArray(result) ? (result as ExecutionResultEntry[]) : [];
     }
 
     async getFile(context: ExecutionRequestContext, path: string): Promise<Buffer> {
@@ -134,6 +137,46 @@ export class ConfigExecutionHandler implements ExecutionHandler<ExecuteResponse>
         }
 
         throw new Error("Invalid config execution file response");
+    }
+
+    /**
+     * Reads many result files by forwarding a single bulk request to the contribution plugin
+     * that owns them.
+     *
+     * A config execution's results live two forwarding hops away, so reading them one file at
+     * a time was what made opening a completed run slow. The plugin-request channel cannot
+     * stream, so the plugin answers with all the contents at once and they are replayed
+     * through `onFile` here — the caller above still receives them one by one.
+     *
+     * @param context The execution request context
+     * @param paths Files to read, or null for every file in the result tree
+     * @param onFile Called with each file's path and content
+     * @returns The entries that were actually read
+     */
+    async getFiles(
+        context: ExecutionRequestContext,
+        paths: string[] | null,
+        onFile: (path: string, content: string) => void
+    ): Promise<ExecutionResultEntry[]> {
+        const routing = this.getRoutingMetadata(context);
+        const requestBody: ConfigExecutionFilesRequestBody = {
+            executionId: context.executionId,
+            paths
+        };
+        const result = (await context.serverApi.sendPluginRequest(
+            routing.languageId,
+            CONFIG_EXECUTION_GET_FILES_REQUEST_KEY,
+            requestBody
+        )) as ConfigExecutionFilesResponse | null;
+
+        if (!result) {
+            return [];
+        }
+
+        for (const [path, content] of Object.entries(result.contents ?? {})) {
+            onFile(path, content);
+        }
+        return result.files ?? [];
     }
 
     async cancel(context: ExecutionRequestContext): Promise<void> {

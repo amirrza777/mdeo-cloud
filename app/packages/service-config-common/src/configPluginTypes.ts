@@ -1,4 +1,4 @@
-import type { FileDependency, DataDependency } from "@mdeo/service-common";
+import type { FileDependency, DataDependency, ExecutionResultEntry } from "@mdeo/service-common";
 
 /**
  * Dependency data passed to each plugin request handler.
@@ -115,6 +115,37 @@ export interface ConfigExecutionFileRequestBody extends ConfigExecutionFollowUpR
 }
 
 /**
+ * Request body for reading many config execution result files at once.
+ *
+ * A config execution's results are forwarded twice — service-config asks the contribution
+ * plugin, which asks the execution service — so reading them one file at a time multiplies
+ * the round trips. This asks for the whole set in one request.
+ */
+export interface ConfigExecutionFilesRequestBody extends ConfigExecutionFollowUpRequestBody {
+    /**
+     * Files to read, or null for every file in the result tree.
+     */
+    paths: string[] | null;
+}
+
+/**
+ * Response to a {@link ConfigExecutionFilesRequestBody}.
+ *
+ * The plugin-request channel is a plain request/response call through the backend and cannot
+ * stream, so the contents come back together rather than file by file.
+ */
+export interface ConfigExecutionFilesResponse {
+    /**
+     * The entries that were read, in result-tree order.
+     */
+    files: ExecutionResultEntry[];
+    /**
+     * File contents, keyed by path.
+     */
+    contents: Record<string, string>;
+}
+
+/**
  * Request-handler key used by config contribution plugin services
  * to register and handle partial-config data requests from service-config.
  */
@@ -139,6 +170,11 @@ export const CONFIG_EXECUTION_GET_FILE_TREE_REQUEST_KEY = "config-execution-get-
  * Request-handler key for config execution file forwarding.
  */
 export const CONFIG_EXECUTION_GET_FILE_REQUEST_KEY = "config-execution-get-file";
+
+/**
+ * Request-handler key for bulk config execution file forwarding.
+ */
+export const CONFIG_EXECUTION_GET_FILES_REQUEST_KEY = "config-execution-get-files";
 
 /**
  * Request-handler key for config execution cancel forwarding.

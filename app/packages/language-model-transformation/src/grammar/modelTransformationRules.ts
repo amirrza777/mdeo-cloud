@@ -22,6 +22,7 @@ import {
     MetamodelFileImport,
     Pattern,
     PatternVariable,
+    PatternVariableReassignment,
     PatternObjectInstance,
     PatternObjectInstanceDelete,
     PatternPropertyAssignment,
@@ -129,15 +130,39 @@ export function generateModelTransformationRules(): {
         ]);
 
     /**
+     * Pattern variable reassignment rule.
+     * Format: name = expression
+     *
+     * `name` must refer to a variable declared in an enclosing scope. The reassignment is
+     * distinguished from a declaration by the absence of the `var` keyword and from an
+     * object-instance reference (`name { ... }`) or typed instance (`name: Class`) by the
+     * `=` operator that follows the identifier.
+     */
+    const PatternVariableReassignmentRule = createRule("PatternVariableReassignmentRule")
+        .returns(PatternVariableReassignment)
+        .as(({ set }) => [set("variable", ref(PatternVariable, ID)), "=", set("value", ExpressionRule)]);
+
+    /**
      * Pattern property assignment rule.
-     * Format: property = value or property == value
+     * Format: property op value, where op is one of: =, ==, !=, <, >, <=, >=
+     * The assignment operator (=) sets a property value; comparison operators
+     * (==, !=, <, >, <=, >=) constrain matching. Multi-character operators are
+     * listed before single-character ones to avoid prefix mismatches.
      * Uses expression for value to support complex expressions.
      */
     const PatternPropertyAssignmentRule = createRule("PatternPropertyAssignmentRule")
         .returns(PatternPropertyAssignment)
         .as(({ set }) => [
             set("name", ref(Property, ID)),
-            or(set("operator", "=="), set("operator", "=")),
+            or(
+                set("operator", "=="),
+                set("operator", "!="),
+                set("operator", "<="),
+                set("operator", ">="),
+                set("operator", "<"),
+                set("operator", ">"),
+                set("operator", "=")
+            ),
             set("value", ExpressionRule)
         ]);
 
@@ -221,6 +246,7 @@ export function generateModelTransformationRules(): {
             many(
                 or(
                     add("elements", PatternVariableRule),
+                    add("elements", PatternVariableReassignmentRule),
                     add("elements", PatternObjectInstanceReferenceRule),
                     add("elements", PatternObjectInstanceRule),
                     add("elements", PatternLinkRule),

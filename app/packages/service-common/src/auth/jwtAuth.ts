@@ -82,6 +82,30 @@ export class JwtAuthMiddleware {
     }
 
     /**
+     * Verifies a bearer token outside of the request pipeline.
+     *
+     * The HTTP routes get their verification from {@link authenticate}, which only applies to
+     * a request that carries an Authorization header. A WebSocket connection is authorized
+     * once at the handshake and then carries many requests for potentially different work, so
+     * the connection's own credentials say nothing about any individual request on it. This
+     * verifies the token each request supplies for itself, against the same JWKS and issuer.
+     *
+     * @param token The raw bearer token
+     * @returns The verified claims
+     * @throws If the token is missing, malformed, expired, or not issued by the backend
+     */
+    async verifyToken(token: string | null | undefined): Promise<JwtClaims> {
+        if (!token) {
+            throw new Error("Missing token");
+        }
+        const { payload } = await jwtVerify<JwtClaims>(token, this.jwks, {
+            issuer: this.issuer,
+            algorithms: ["RS256"]
+        });
+        return payload;
+    }
+
+    /**
      * Helper method to get JWT claims from an authenticated request.
      * This should only be called in routes protected by the authenticate middleware.
      *

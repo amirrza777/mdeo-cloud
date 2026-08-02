@@ -49,6 +49,11 @@ interface InjectedServices {
     val jwtService: JwtService
 
     /**
+     * Service checking that a bound token's work is still in progress.
+     */
+    val tokenBindingService: TokenBindingService
+
+    /**
      * Service for computing and caching file data with dependency tracking.
      */
     val fileDataService: FileDataService

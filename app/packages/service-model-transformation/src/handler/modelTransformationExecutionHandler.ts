@@ -1,10 +1,11 @@
-import type {
-    ExecutionHandler,
-    ExecutionContext,
-    ExecutionRequestContext,
-    CanHandleResult,
-    ExecuteResponse,
-    FileEntry
+import {
+    ExecutionServiceWsProxy,
+    type ExecutionHandler,
+    type ExecutionContext,
+    type ExecutionRequestContext,
+    type CanHandleResult,
+    type ExecuteResponse,
+    type ExecutionResultEntry
 } from "@mdeo/service-common";
 
 /**
@@ -36,12 +37,22 @@ export class ModelTransformationExecutionHandler implements ExecutionHandler<Exe
     private readonly backendUrl: string;
 
     /**
+     * Result access over the shared execution WebSocket protocol.
+     *
+     * Result reads dominate the traffic to the execution service and each one used to cost a
+     * fresh HTTP request; this holds a connection open across a burst of them and lets the
+     * whole result set be fetched in one go.
+     */
+    private readonly results: ExecutionServiceWsProxy;
+
+    /**
      * Creates a new model transformation execution handler.
      *
      * @param backendUrl URL of the model-transformation-execution backend service
      */
     constructor(backendUrl: string) {
         this.backendUrl = backendUrl;
+        this.results = new ExecutionServiceWsProxy(backendUrl);
     }
 
     /**
@@ -130,14 +141,7 @@ export class ModelTransformationExecutionHandler implements ExecutionHandler<Exe
      * @returns Promise resolving to a markdown-formatted summary
      */
     async getSummary(context: ExecutionRequestContext): Promise<string> {
-        const { executionId, jwt } = context;
-        const response = await this.fetchWithErrorHandling(`${this.backendUrl}/api/executions/${executionId}/summary`, {
-            method: "GET",
-            headers: this.buildHeaders(jwt)
-        });
-
-        const result = await response.json();
-        return result.summary || "";
+        return this.results.getSummary(context);
     }
 
     /**
@@ -150,18 +154,8 @@ export class ModelTransformationExecutionHandler implements ExecutionHandler<Exe
      * @param jwt JWT token for authentication
      * @returns Promise resolving to the list of files and directories
      */
-    async getFileTree(context: ExecutionRequestContext): Promise<FileEntry[]> {
-        const { executionId, jwt } = context;
-        const response = await this.fetchWithErrorHandling(
-            `${this.backendUrl}/api/executions/${executionId}/file-tree`,
-            {
-                method: "GET",
-                headers: this.buildHeaders(jwt)
-            }
-        );
-
-        const result = await response.json();
-        return result.files || [];
+    async getFileTree(context: ExecutionRequestContext): Promise<ExecutionResultEntry[]> {
+        return this.results.getFileTree(context);
     }
 
     /**
@@ -175,17 +169,23 @@ export class ModelTransformationExecutionHandler implements ExecutionHandler<Exe
      * @returns Promise resolving to the file contents as a Buffer
      */
     async getFile(context: ExecutionRequestContext, path: string): Promise<Buffer> {
-        const { executionId, jwt } = context;
-        const response = await this.fetchWithErrorHandling(
-            `${this.backendUrl}/api/executions/${executionId}/files/${path}`,
-            {
-                method: "GET",
-                headers: this.buildHeaders(jwt)
-            }
-        );
+        return Buffer.from(await this.results.getFile(context, path), "utf-8");
+    }
 
-        const text = await response.text();
-        return Buffer.from(text, "utf-8");
+    /**
+     * Reads many result files in a single request to the execution service.
+     *
+     * @param context The execution request context
+     * @param paths Files to read, or null for every file in the result tree
+     * @param onFile Called with each file's path and content as it streams back
+     * @returns The entries that were actually read
+     */
+    async getFiles(
+        context: ExecutionRequestContext,
+        paths: string[] | null,
+        onFile: (path: string, content: string) => void
+    ): Promise<ExecutionResultEntry[]> {
+        return this.results.getFiles(context, paths, onFile);
     }
 
     /**
@@ -198,11 +198,7 @@ export class ModelTransformationExecutionHandler implements ExecutionHandler<Exe
      * @returns Promise that resolves when the execution is cancelled
      */
     async cancel(context: ExecutionRequestContext): Promise<void> {
-        const { executionId, jwt } = context;
-        await this.fetchWithErrorHandling(`${this.backendUrl}/api/executions/${executionId}/cancel`, {
-            method: "POST",
-            headers: this.buildHeaders(jwt)
-        });
+        await this.results.cancel(context);
     }
 
     /**
@@ -215,13 +211,7 @@ export class ModelTransformationExecutionHandler implements ExecutionHandler<Exe
      * @returns Promise that resolves when the execution is deleted
      */
     async delete(context: ExecutionRequestContext): Promise<void> {
-        const { executionId, jwt } = context;
-        await this.fetchWithErrorHandling(`${this.backendUrl}/api/executions/${executionId}`, {
-            method: "DELETE",
-            headers: {
-                Authorization: `Bearer ${jwt}`
-            }
-        });
+        await this.results.delete(context);
     }
 
     /**

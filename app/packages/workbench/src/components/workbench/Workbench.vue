@@ -45,7 +45,8 @@ import SidebarRail from "../sidebar/SidebarRail.vue";
 import Editor from "../editor/Editor.vue";
 import WorkbenchBackground from "./WorkbenchBackground.vue";
 import ActionDialog from "../action/ActionDialog.vue";
-import { useResizeObserver } from "@vueuse/core";
+import { useEventListener, useResizeObserver } from "@vueuse/core";
+import type * as monacoType from "monaco-editor";
 import { SplitterPanel } from "reka-ui";
 import { authStateKey, workbenchStateKey } from "./util";
 import type { WorkbenchState } from "@/data/workbenchState";
@@ -114,6 +115,57 @@ watch(
         }
     }
 );
+
+useEventListener(
+    window,
+    "keydown",
+    (event: KeyboardEvent) => {
+        if (!(event.ctrlKey || event.metaKey) || !event.shiftKey || event.altKey) {
+            return;
+        }
+        if (event.key.toLowerCase() !== "f") {
+            return;
+        }
+
+        event.preventDefault();
+        event.stopPropagation();
+        props.workbenchState.revealSearch(getSelectedText());
+    },
+    { capture: true }
+);
+
+/**
+ * Reads the text that is currently selected, either in the active editor or in the document.
+ * Selections spanning multiple lines are ignored, as they are not useful as a search term.
+ *
+ * @returns the selected text, or undefined if nothing usable is selected
+ */
+function getSelectedText(): string | undefined {
+    const editor = props.workbenchState.monacoApi.editorService.activeTextEditorControl as
+        | monacoType.editor.ICodeEditor
+        | undefined;
+    const selection = editor?.getSelection?.();
+    const model = editor?.getModel?.();
+
+    if (selection != undefined && model != undefined && "getValueInRange" in model && !selection.isEmpty()) {
+        return singleLine(model.getValueInRange(selection));
+    }
+
+    return singleLine(window.getSelection()?.toString());
+}
+
+/**
+ * Restricts a selection to a usable search term.
+ *
+ * @param text the selected text
+ * @returns the text if it is a non empty single line, undefined otherwise
+ */
+function singleLine(text: string | undefined): string | undefined {
+    if (text == undefined || text.length === 0 || text.includes("\n")) {
+        return undefined;
+    }
+    return text;
+}
 
 const pluginStylesUrls = computed(() =>
     props.workbenchState.languagePlugins.value

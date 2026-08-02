@@ -20,6 +20,7 @@ import kotlinx.serialization.encodeToByteArray
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * [WorkerClient] implementation for remote worker nodes.
@@ -58,7 +59,12 @@ class RemoteWorkerClient(
             requestTimeoutMillis = 600_000
             socketTimeoutMillis = 600_000
         }
-        install(WebSockets)
+        install(WebSockets) {
+            // Without traffic of its own, a session whose peer has vanished rather than
+            // disconnected stays open on this side indefinitely. Pinging turns that into a
+            // closed session, which drains the requests waiting on it.
+            pingIntervalMillis = HEARTBEAT_INTERVAL_MS
+        }
     }
 
     private val logger = LoggerFactory.getLogger(RemoteWorkerClient::class.java)
@@ -66,8 +72,22 @@ class RemoteWorkerClient(
     /** Pending request correlation: requestId → deferred result. */
     private val pendingRequests = ConcurrentHashMap<String, CompletableDeferred<WorkerWsMessage>>()
 
-    /** Active subprocess WS session, resolved when subprocess connects back. */
-    private val wsSessionDeferred = CompletableDeferred<DefaultWebSocketSession>()
+    /**
+     * Progress reported by the worker for each in-flight request, which is what [sendAndReceive]
+     * waits on. A remote node can also be lost without its session closing — a severed network
+     * path leaves this side holding a connection nobody is on the other end of — and the absence
+     * of these beats is what surfaces that.
+     */
+    private val liveness = RequestLiveness()
+
+    /**
+     * Holds the [CompletableDeferred] for the current batch's subprocess WS session.
+     *
+     * Replaced with a fresh deferred at the start of each [allocate] call so that
+     * re-used [RemoteWorkerClient] instances (across batches) do not accidentally
+     * resolve to the stale, already-closed session from a previous batch.
+     */
+    private val wsSessionDeferredRef = AtomicReference(CompletableDeferred<DefaultWebSocketSession>())
 
     /** Background WS read loop job. */
     private var wsJob: Job? = null
@@ -79,8 +99,15 @@ class RemoteWorkerClient(
      * Registers a slot in the [OrchestratorRegistry], sends the HTTP allocation request
      * embedding the orchestrator WS URL, then waits for the subprocess to connect back
      * before starting the WS read loop.
+     *
+     * A fresh [CompletableDeferred] is installed in [wsSessionDeferredRef] at the start
+     * of every call so that a reused [RemoteWorkerClient] instance (across batches) always
+     * hands [sendAndReceive] the session that belongs to the *current* batch, not a stale
+     * closed session from a previous one.
      */
     override suspend fun allocate(request: WorkerAllocationRequest): WorkerAllocationResponse {
+        wsSessionDeferredRef.set(CompletableDeferred())
+
         val registryKey = OrchestratorRegistry.key(request.executionId, nodeId)
         val orchestratorWsUrl = "$wsBaseUrl/ws/subprocess/executions/${request.executionId}/$nodeId"
         logger.info(
@@ -91,6 +118,13 @@ class RemoteWorkerClient(
         val response = try {
             val httpResp = httpClient.post("$baseUrl/api/worker/executions") {
                 contentType(ContentType.Application.Json)
+                // Allocation builds and evaluates the initial population, so this call lasts as
+                // long as that evaluation does — a length the config sets and the worker's
+                // watchdog enforces. Capping it here would abandon a worker that is still working.
+                timeout {
+                    requestTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                    socketTimeoutMillis = HttpTimeoutConfig.INFINITE_TIMEOUT_MS
+                }
                 setBody(request.copy(orchestratorWsUrl = orchestratorWsUrl, useLocalChannel = false))
             }
             if (!httpResp.status.isSuccess()) {
@@ -143,21 +177,28 @@ class RemoteWorkerClient(
         httpClient.close()
     }
 
-    override suspend fun sendAndReceive(msg: WorkerWsMessage, timeoutMs: Long): WorkerWsMessage {
-        val session = withTimeout(SESSION_READY_TIMEOUT_MS) { wsSessionDeferred.await() }
+    override suspend fun sendAndReceive(msg: WorkerWsMessage): WorkerWsMessage {
+        val session = withTimeout(SESSION_READY_TIMEOUT_MS) { wsSessionDeferredRef.get().await() }
         val deferred = CompletableDeferred<WorkerWsMessage>()
         pendingRequests[msg.requestId] = deferred
+        liveness.starting(msg.requestId)
         try {
             session.send(Frame.Binary(true, cbor.encodeToByteArray<WorkerWsMessage>(msg)))
         } catch (e: Exception) {
             pendingRequests.remove(msg.requestId)
+            liveness.finished(msg.requestId)
             throw e
         }
-        return withTimeout(timeoutMs) { deferred.await() }
+        return try {
+            liveness.awaitWhileAlive(msg.requestId, deferred)
+        } finally {
+            pendingRequests.remove(msg.requestId)
+            liveness.finished(msg.requestId)
+        }
     }
 
     private fun startRegistryWsReadLoop(executionId: String, session: DefaultWebSocketSession) {
-        wsSessionDeferred.complete(session)
+        wsSessionDeferredRef.get().complete(session)
         wsJob = scope.launch {
             try {
                 logger.info("Subprocess WS connected for node {} (execution {})", nodeId, executionId)
@@ -185,6 +226,10 @@ class RemoteWorkerClient(
         msg: WorkerWsMessage,
         session: DefaultWebSocketSession
     ): Boolean {
+        if (msg is WorkerHeartbeat) {
+            liveness.signal(msg.requestId)
+            return true
+        }
         if (msg is WorkerShutdownNotice) {
             logger.warn("[node={}] Received WorkerShutdownNotice: {}", nodeId, msg.reason)
             shutdownReason = msg.reason

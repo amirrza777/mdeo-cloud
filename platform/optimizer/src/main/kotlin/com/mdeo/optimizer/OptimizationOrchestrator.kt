@@ -8,6 +8,7 @@ import com.mdeo.optimizer.metrics.OptimizationMetricsCollector
 import com.mdeo.optimizer.moea.DelegatingAlgorithmProvider
 import com.mdeo.optimizer.moea.DelegatingProblem
 import com.mdeo.optimizer.moea.EvaluationCoordinator
+import com.mdeo.optimizer.moea.ParetoHistoryExtension
 import com.mdeo.optimizer.moea.ProgressCallbackExtension
 import com.mdeo.optimizer.moea.SearchResult
 import com.mdeo.optimizer.moea.TerminationConditionAdapter
@@ -37,18 +38,32 @@ class OptimizationOrchestrator(
     private val logger = LoggerFactory.getLogger(OptimizationOrchestrator::class.java)
 
     /**
-     * Runs the optimization and returns the search result.
+     * Runs the optimization and returns the search results for every batch.
      *
      * Creates the [EvaluationCoordinator], [DelegatingProblem], and
      * [DelegatingAlgorithmProvider], then executes the configured number of batches.
+     * Before each batch after the first the coordinator and evaluator are fully reset
+     * so that no stale solution references leak across batch boundaries.
+     *
      * The [onGenerationComplete] callback is invoked after every generation so that
      * callers can report progress and check for cancellation.
      *
-     * @param onGenerationComplete Suspend callback that receives the 1-based generation counter.
+     * The [onBatchComplete] callback is invoked at the end of each batch while the
+     * evaluator still holds the solutions for that batch (i.e. before the evaluator
+     * is reset for the next one).  Callers can use this window to fetch solution model
+     * data that would become unavailable after the reset.
+     *
+    * @param onGenerationComplete Suspend callback that receives the 1-based batch index and
+    *   the 1-based generation counter.
      *   Throwing [kotlinx.coroutines.CancellationException] from this callback aborts the search.
-     * @return The [SearchResult] containing the final approximation set and metrics.
+     * @param onBatchComplete Suspend callback invoked after each batch with the 1-based batch
+     *   index, the [SearchResult] for that batch, and the wall-clock duration in milliseconds.
+     * @return The list of [SearchResult]s, one per batch, in execution order.
      */
-    suspend fun run(onGenerationComplete: suspend (generation: Int) -> Unit = {}): SearchResult =
+    suspend fun run(
+        onGenerationComplete: suspend (batchIndex: Int, generation: Int) -> Unit = { _, _ -> },
+        onBatchComplete: suspend (batchIndex: Int, result: SearchResult, durationMs: Long) -> Unit = { _, _, _ -> }
+    ): List<SearchResult> =
         withContext(Dispatchers.IO) {
             logger.info(
                 "Starting optimization: algorithm=${config.solver.algorithm}, " +
@@ -65,10 +80,16 @@ class OptimizationOrchestrator(
             val properties = provider.buildProperties(config.solver)
 
             val batches = config.solver.batches.coerceAtLeast(1)
-            var bestResult: SearchResult? = null
+            val allResults = mutableListOf<SearchResult>()
 
-            for (batch in 1..batches) {
-                logger.info("Running optimization batch $batch/$batches with algorithm ${config.solver.algorithm}")
+            for (batchIndex in 1..batches) {
+                if (batchIndex > 1) {
+                    // Reset coordinator first so no stale refs are sent to the fresh workers.
+                    coordinator.reset()
+                    evaluator.resetBatch()
+                }
+
+                logger.info("Running optimization batch $batchIndex/$batches with algorithm ${config.solver.algorithm}")
 
                 val instrumenter = createInstrumenter()
                 val algorithm = provider.getAlgorithm(config.solver.algorithm.name, properties, problem)
@@ -76,13 +97,17 @@ class OptimizationOrchestrator(
                 val metricsCollector = OptimizationMetricsCollector()
 
                 val progressListener = OptimizationProgressListener { generation ->
-                    onGenerationComplete(generation)
+                    onGenerationComplete(batchIndex, generation)
                 }
                 algorithm.addExtension(ProgressCallbackExtension(progressListener, coordinator, metricsCollector))
+
+                val paretoHistoryExtension = ParetoHistoryExtension()
+                algorithm.addExtension(paretoHistoryExtension)
 
                 val instrumentedAlgorithm = instrumenter.instrument(algorithm)
                 val terminationCondition = TerminationConditionAdapter(config.solver).create()
 
+                val batchStartMs = System.currentTimeMillis()
                 try {
                     instrumentedAlgorithm.run(terminationCondition)
                 } catch (e: kotlinx.coroutines.CancellationException) {
@@ -94,15 +119,22 @@ class OptimizationOrchestrator(
                     logger.error(msg, e)
                     throw RuntimeException(msg, e)
                 }
+                val batchDurationMs = System.currentTimeMillis() - batchStartMs
 
-                val result = SearchResult(instrumentedAlgorithm.getSeries(), instrumentedAlgorithm.getResult(), metricsCollector)
-                if (bestResult == null) {
-                    bestResult = result
-                }
+                val result = SearchResult(
+                    instrumentedAlgorithm.getSeries(),
+                    instrumentedAlgorithm.getResult(),
+                    metricsCollector,
+                    paretoHistoryExtension.getHistory()
+                )
+                allResults.add(result)
+
+                // Notify the caller while this batch's solutions are still live in the evaluator.
+                onBatchComplete(batchIndex, result, batchDurationMs)
             }
 
             logger.info("Optimization completed after $batches batch(es)")
-            bestResult!!
+            allResults
         }
 
     /**

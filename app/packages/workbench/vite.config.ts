@@ -32,6 +32,7 @@ export default defineConfig({
                 target: "http://localhost:3003",
                 changeOrigin: true,
                 secure: false,
+                ws: true,
                 rewrite: (path) => path.replace(/^\/plugin\/model-transformation/, ""),
                 configure: addCoopCoepHeaders
             },
@@ -39,6 +40,7 @@ export default defineConfig({
                 target: "http://localhost:3000",
                 changeOrigin: true,
                 secure: false,
+                ws: true,
                 rewrite: (path) => path.replace(/^\/plugin\/metamodel/, ""),
                 configure: addCoopCoepHeaders
             },
@@ -46,6 +48,7 @@ export default defineConfig({
                 target: "http://localhost:3001",
                 changeOrigin: true,
                 secure: false,
+                ws: true,
                 rewrite: (path) => path.replace(/^\/plugin\/model/, ""),
                 configure: addCoopCoepHeaders
             },
@@ -53,6 +56,7 @@ export default defineConfig({
                 target: "http://localhost:3002",
                 changeOrigin: true,
                 secure: false,
+                ws: true,
                 rewrite: (path) => path.replace(/^\/plugin\/script/, ""),
                 configure: addCoopCoepHeaders
             },
@@ -60,6 +64,7 @@ export default defineConfig({
                 target: "http://localhost:3005",
                 changeOrigin: true,
                 secure: false,
+                ws: true,
                 rewrite: (path) => path.replace(/^\/plugin\/config-optimization/, ""),
                 configure: addCoopCoepHeaders
             },
@@ -67,6 +72,7 @@ export default defineConfig({
                 target: "http://localhost:3006",
                 changeOrigin: true,
                 secure: false,
+                ws: true,
                 rewrite: (path) => path.replace(/^\/plugin\/config-mdeo/, ""),
                 configure: addCoopCoepHeaders
             },
@@ -74,6 +80,7 @@ export default defineConfig({
                 target: "http://localhost:3004",
                 changeOrigin: true,
                 secure: false,
+                ws: true,
                 rewrite: (path) => path.replace(/^\/plugin\/config/, ""),
                 configure: addCoopCoepHeaders
             },

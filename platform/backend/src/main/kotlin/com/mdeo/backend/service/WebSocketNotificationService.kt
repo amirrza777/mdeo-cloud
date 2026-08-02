@@ -3,6 +3,8 @@ package com.mdeo.backend.service
 import com.mdeo.common.model.Execution
 import com.mdeo.common.model.FileEntry
 import com.mdeo.common.model.Project
+import com.mdeo.common.transport.ExecutionWsMessage
+import com.mdeo.common.transport.ExecutionWsProtocol
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
 import kotlinx.coroutines.sync.Mutex
@@ -682,5 +684,21 @@ class WebSocketNotificationService {
         val messageJson = json.encodeToString(message)
         val connection = connections[connectionId] ?: return
         sendMessageSafely(connection, messageJson)
+    }
+
+    /**
+     * Sends a shared execution protocol message to a specific connection.
+     *
+     * Execution result messages are defined once and spoken on every hop between the browser
+     * and the service that stores the results, so they are not part of this service's own
+     * message hierarchy. They travel the same connection and are told apart by the same
+     * `messageType` field.
+     *
+     * @param connectionId The connection ID to send to
+     * @param message The message to send
+     */
+    suspend fun sendMessage(connectionId: String, message: ExecutionWsMessage) {
+        val connection = connections[connectionId] ?: return
+        sendMessageSafely(connection, ExecutionWsProtocol.encode(message))
     }
 }

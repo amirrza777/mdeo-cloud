@@ -93,6 +93,8 @@ data class AppConfig(
                 jwt = JwtConfig(
                     expirationSeconds = System.getenv("JWT_EXPIRATION_SECONDS")?.toLongOrNull()
                         ?: TimeUnit.HOURS.toSeconds(1),
+                    executionExpirationSeconds = System.getenv("JWT_EXECUTION_EXPIRATION_SECONDS")?.toLongOrNull()
+                        ?: TimeUnit.DAYS.toSeconds(7),
                     issuer = System.getenv("JWT_ISSUER") ?: "mdeo-platform",
                     privateKey = System.getenv("JWT_PRIVATE_KEY"),
                     publicKey = System.getenv("JWT_PUBLIC_KEY")
@@ -180,12 +182,16 @@ data class PluginConfig(
  * JWT configuration for plugin authentication.
  *
  * @property expirationSeconds JWT token expiration time in seconds (default 1 hour)
+ * @property executionExpirationSeconds Expiration time in seconds for the token handed to an execution
+ *   node when an execution is submitted (default 7 days). The node keeps this token for the whole run
+ *   and needs it to report the terminal state, so it must outlive the longest expected execution.
  * @property issuer JWT issuer identifier
  * @property privateKey Base64-encoded RSA private key (PKCS8 format), optional - will be generated if not provided
  * @property publicKey Base64-encoded RSA public key (X.509 format), optional - will be generated if not provided
  */
 data class JwtConfig(
     val expirationSeconds: Long,
+    val executionExpirationSeconds: Long,
     val issuer: String,
     val privateKey: String? = null,
     val publicKey: String? = null

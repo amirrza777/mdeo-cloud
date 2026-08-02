@@ -34,6 +34,10 @@ MDEO Cloud supports multiple custom Domain-Specific Languages (DSLs) built with 
 
 ## 🚀 Deployment
 
+> [!CAUTION]
+> After upgrading to a new version, an administrator needs to refresh all plugins (settings => plugins).
+> Otherwise, plugin files will fail to load.
+
 MDEO Cloud is designed to be easily deployable in both local development environments and scalable cloud infrastructures.
 
 ### Docker Compose Setups
@@ -54,6 +58,12 @@ Use `infra/docker-compose-dev.yaml` when you are changing code locally and want 
 ```bash
 docker compose -f infra/docker-compose-dev.yaml up --build
 ```
+
+> [!NOTE]
+> **Default credentials**
+>
+> - **Username:** `admin`
+> - **Password:** `admin`
 
 #### Production
 Use `infra/docker-compose-prod.yaml` for a production-style deployment from published images. This setup keeps configuration externalized through environment variables and is intended for managed hosts or VM deployments where you provide a populated env file.

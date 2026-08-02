@@ -107,7 +107,7 @@ export class BackendApi implements BackendApiCore {
         this.websocket = new WebSocketApi({ baseUrl });
         this.files = new WsFilesApi(this.websocket);
         this.plugins = new PluginsApi(this);
-        this.executions = new ExecutionsApi(this);
+        this.executions = new ExecutionsApi(this, this.websocket);
         this.fileData = new FileDataApi(this);
     }
 

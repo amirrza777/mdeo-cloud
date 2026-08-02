@@ -2,9 +2,11 @@ package com.mdeo.modeltransformation.runtime.match.plan
 
 import com.mdeo.expression.ast.expressions.TypedExpression
 import com.mdeo.metamodel.data.MetamodelData
+import com.mdeo.modeltransformation.graph.ModelStatistics
 import com.mdeo.modeltransformation.ast.patterns.TypedPatternLinkElement
 import com.mdeo.modeltransformation.ast.patterns.TypedPatternObjectInstance
 import com.mdeo.modeltransformation.ast.patterns.TypedPatternObjectInstanceElement
+import com.mdeo.modeltransformation.ast.patterns.TypedPatternVariable
 import com.mdeo.modeltransformation.ast.patterns.TypedPatternVariableElement
 import com.mdeo.modeltransformation.ast.patterns.TypedPatternWhereClauseElement
 import com.mdeo.modeltransformation.runtime.match.ExpressionNodeAnalyzer
@@ -39,7 +41,13 @@ internal data class PendingCondition(
  * @property instances Merged list of all main-pattern (matchable + delete) instance
  *           elements, deduplicated by name.
  * @property links All main-pattern link elements (matchable + delete).
- * @property variables All pattern variable elements.
+ * @property variables All pattern variable elements. Reassignments (`name = value` for a
+ *           variable declared in an enclosing scope) are represented here as synthetic
+ *           variable elements so they participate in dependency ordering; their names are
+ *           additionally recorded in [reassignedNames].
+ * @property reassignedNames Names of variables that are reassigned (rather than declared)
+ *           in this pattern. These are a subset of [variableNames] and drive the
+ *           reassignment-specific emission (label flip + write-back).
  * @property whereClauses All where-clause filter elements.
  * @property referencedInstances Names of instances referenced from expressions that are
  *           not themselves matchable (e.g. context objects bound by the caller).
@@ -58,6 +66,9 @@ internal data class PendingCondition(
  *           bound to distinct vertices, as computed by [computeInjectivePairs].
  * @property metamodelData The metamodel used for association lookups and BFS ordering
  *           inside application conditions.
+ * @property costModel Model-sensitive branching-factor estimates, or `null` when no
+ *           [com.mdeo.modeltransformation.graph.ModelStatistics] were supplied. When it is
+ *           `null` the planner falls back to purely structural step ordering.
  * @property getVertexId Function returning a pre-bound vertex ID for an instance name,
  *           or `null` if the instance must be found by graph traversal.
  * @property nodeAnalyzer Analyser that extracts the set of node names referenced by an
@@ -70,6 +81,7 @@ internal class MatchPlanGraph(
     val instances: List<TypedPatternObjectInstanceElement>,
     val links: List<TypedPatternLinkElement>,
     val variables: List<TypedPatternVariableElement>,
+    val reassignedNames: Set<String>,
     val whereClauses: List<TypedPatternWhereClauseElement>,
     val referencedInstances: Set<String>,
     val conditions: List<PendingCondition>,
@@ -79,10 +91,23 @@ internal class MatchPlanGraph(
     val instancePriorities: Map<String, Int>,
     val injectivePairs: List<Pair<String, String>>,
     val metamodelData: MetamodelData,
+    private val statistics: ModelStatistics?,
     val getVertexId: (String) -> Any?,
     val nodeAnalyzer: ExpressionNodeAnalyzer,
     val isCollectionExpression: (TypedExpression) -> Boolean
 ) {
+    /**
+     * Model-sensitive cost estimates, or `null` when no statistics were supplied.
+     *
+     * Built on first use: a pattern with a single matchable instance has no ordering choice
+     * to make, and such patterns are common enough — and cheap enough to match — that
+     * constructing a cost model for them is measurable in a search that runs hundreds of
+     * thousands of mutations.
+     */
+    val costModel: MatchCostModel? by lazy {
+        statistics?.let { MatchCostModel(metamodelData, it, nodeAnalyzer, isCollectionExpression) }
+    }
+
     /** Fast lookup of an instance element by name; derived from [instances]. */
     val instanceMap: Map<String, TypedPatternObjectInstanceElement> =
         instances.associateBy { it.objectInstance.name }
@@ -243,6 +268,9 @@ internal class MatchPlanGraph(
          * @param isCollectionExpression Predicate returning `true` for collection-typed
          *        expressions.
          * @param metamodelData The metamodel used for DAG computation and BFS ordering.
+         * @param statistics Cardinality snapshot of the model being matched, or `null` when
+         *        no statistics are available. When present, a [MatchCostModel] is built from
+         *        it and the planner orders steps by estimated branching factor.
          * @return A fully populated [MatchPlanGraph] ready for consumption by
          *         [MatchPlanBuilder.PlanExecution].
          */
@@ -252,13 +280,25 @@ internal class MatchPlanGraph(
             getVertexId: (String) -> Any?,
             nodeAnalyzer: ExpressionNodeAnalyzer,
             isCollectionExpression: (TypedExpression) -> Boolean,
-            metamodelData: MetamodelData
+            metamodelData: MetamodelData,
+            statistics: ModelStatistics?
         ): MatchPlanGraph {
             val pseudoCompositionDag = MetamodelClassPriority.computePseudoCompositionDag(metamodelData)
             val instances = mergeInstancesByName(elements.matchableInstances + elements.deleteInstances)
             val links = elements.matchableLinks + elements.deleteLinks
             val matchableNames = instances.map { it.objectInstance.name }.toSet()
-            val variableNames = elements.variables.map { it.variable.name }.toSet()
+
+            // Represent reassignments as synthetic variable elements so they participate in
+            // the same dependency-ordering machinery as variable declarations. Their names
+            // are recorded separately so the builder can emit reassignment-flavoured steps.
+            val reassignedNames = elements.variableReassignments.map { it.reassignment.name }.toSet()
+            val reassignmentVars = elements.variableReassignments.map { el ->
+                TypedPatternVariableElement(
+                    variable = TypedPatternVariable(name = el.reassignment.name, value = el.reassignment.value)
+                )
+            }
+            val variables = elements.variables + reassignmentVars
+            val variableNames = variables.map { it.variable.name }.toSet()
 
             val forbidIslands = buildIslandsIncludingOrphanLinks(elements.forbidInstances, elements.forbidLinks, matchableNames)
             val requireIslands = buildIslandsIncludingOrphanLinks(elements.requireInstances, elements.requireLinks, matchableNames)
@@ -268,16 +308,18 @@ internal class MatchPlanGraph(
             return MatchPlanGraph(
                 instances = instances,
                 links = links,
-                variables = elements.variables,
+                variables = variables,
+                reassignedNames = reassignedNames,
                 whereClauses = elements.whereClauses,
                 referencedInstances = referencedInstances,
                 conditions = conditions,
                 forbidIslands = forbidIslands,
-                variableNodeDeps = computeVariableNodeDeps(elements.variables, variableNames, nodeAnalyzer),
-                variableVarDeps = computeVariableVarDeps(elements.variables, variableNames, nodeAnalyzer),
+                variableNodeDeps = computeVariableNodeDeps(variables, variableNames, nodeAnalyzer),
+                variableVarDeps = computeVariableVarDeps(variables, variableNames, nodeAnalyzer),
                 instancePriorities = computeInstancePriorities(instances, elements.requireInstances, links, elements.requireLinks, pseudoCompositionDag),
                 injectivePairs = computeInjectivePairs(instances),
                 metamodelData = metamodelData,
+                statistics = statistics,
                 getVertexId = getVertexId,
                 nodeAnalyzer = nodeAnalyzer,
                 isCollectionExpression = isCollectionExpression

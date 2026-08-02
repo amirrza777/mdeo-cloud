@@ -1,6 +1,7 @@
 package com.mdeo.optimizerexecution
 
 import com.mdeo.execution.common.auth.configureJwtAuth
+import com.mdeo.execution.common.config.configureExecutionTransport
 import com.mdeo.execution.common.config.configureSerialization
 import com.mdeo.execution.common.config.configureStatusPages
 import com.mdeo.execution.common.database.DatabaseFactory
@@ -66,6 +67,7 @@ fun Application.module(appConfig: AppConfig) {
     configureSerialization()
     configureStatusPages()
     configureJwtAuth(appConfig.backendApiUrl, appConfig.jwtIssuer)
+    configureExecutionTransport(appConfig.backendApiUrl, appConfig.jwtIssuer)
 
     routing {
         healthRoutes { databaseFactory.checkConnection() }

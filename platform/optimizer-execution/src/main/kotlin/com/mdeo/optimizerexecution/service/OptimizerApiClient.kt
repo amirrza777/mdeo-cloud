@@ -41,35 +41,23 @@ class OptimizerApiClient(baseUrl: String) : BackendApiClient(baseUrl) {
     /**
      * HTTP client configured with transformation AST contextual serializers. 
      */
-    private val transformationClient: HttpClient = HttpClient(CIO) {
-        install(ContentNegotiation) {
-            json(Json {
-                ignoreUnknownKeys = true
-                isLenient = true
-                serializersModule = SerializersModule {
-                    contextual(TypedExpression::class, TransformationExpressionSerializer)
-                    contextual(TypedTransformationStatement::class, TypedTransformationStatementSerializer)
-                    contextual(TypedPatternElement::class, TypedPatternElementSerializer)
-                }
-            })
+    private val transformationClient: HttpClient = createBackendClient(
+        SerializersModule {
+            contextual(TypedExpression::class, TransformationExpressionSerializer)
+            contextual(TypedTransformationStatement::class, TypedTransformationStatementSerializer)
+            contextual(TypedPatternElement::class, TypedPatternElementSerializer)
         }
-    }
+    )
 
     /**
      * HTTP client configured with script AST contextual serializers. 
      */
-    private val scriptClient: HttpClient = HttpClient(CIO) {
-        install(ContentNegotiation) {
-            json(Json {
-                ignoreUnknownKeys = true
-                isLenient = true
-                serializersModule = SerializersModule {
-                    contextual(TypedExpression::class, ScriptExpressionSerializer)
-                    contextual(TypedStatement::class, TypedStatementSerializer)
-                }
-            })
+    private val scriptClient: HttpClient = createBackendClient(
+        SerializersModule {
+            contextual(TypedExpression::class, ScriptExpressionSerializer)
+            contextual(TypedStatement::class, TypedStatementSerializer)
         }
-    }
+    )
 
     /**
      * Fetches the typed AST for a model transformation file.

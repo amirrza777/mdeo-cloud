@@ -1,5 +1,7 @@
 package com.mdeo.modeltransformation.graph.mdeo
 
+import org.apache.tinkerpop.gremlin.process.traversal.Compare
+import org.apache.tinkerpop.gremlin.process.traversal.Contains
 import org.apache.tinkerpop.gremlin.process.traversal.step.HasContainerHolder
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStep
 import org.apache.tinkerpop.gremlin.process.traversal.step.map.GraphStepContract
@@ -7,6 +9,7 @@ import org.apache.tinkerpop.gremlin.process.traversal.step.util.HasContainer
 import org.apache.tinkerpop.gremlin.process.traversal.util.AndP
 import org.apache.tinkerpop.gremlin.structure.Edge
 import org.apache.tinkerpop.gremlin.structure.Element
+import org.apache.tinkerpop.gremlin.structure.T
 import org.apache.tinkerpop.gremlin.structure.Vertex
 import org.apache.tinkerpop.gremlin.structure.util.StringFactory
 import java.util.Collections
@@ -15,7 +18,7 @@ import java.util.Collections
  * Optimized [GraphStep] for [MdeoGraph] that filters results efficiently using arrays.
  *
  * Unlike TinkerGraphStep, this implementation:
- * - Does not support indexes (no index-based lookup)
+ * - Indexes only on vertex label, not on arbitrary properties
  * - Uses array-backed iterators instead of list + CloseableIterator
  * - Avoids exception-based flow control in iteration
  * - Only supports integer IDs
@@ -46,6 +49,11 @@ class MdeoGraphStep<S, E : Element>(
     /**
      * Returns vertices from the graph, filtered by IDs and HasContainers.
      *
+     * When the step carries a label equality constraint — which every pattern match does,
+     * since a match step compiles to `V().hasLabel(className)` — the candidates come from
+     * the graph's per-label index instead of the full vertex list. The label container is
+     * then dropped from the filter, as the index has already applied it.
+     *
      * @return An iterator over matching vertices.
      */
     private fun vertices(): Iterator<Vertex> {
@@ -53,10 +61,44 @@ class MdeoGraphStep<S, E : Element>(
 
         if (this.ids == null) return Collections.emptyIterator()
 
-        return if (this.ids.isNotEmpty()) {
-            filterToArray(graph.vertices(*this.ids))
+        if (this.ids.isNotEmpty()) {
+            return filterToArray(graph.vertices(*this.ids), hasContainers)
+        }
+
+        val labelContainer = hasContainers.firstOrNull { indexableLabels(it) != null }
+            ?: return filterToArray(graph.vertices(), hasContainers)
+
+        val labels = indexableLabels(labelContainer)!!
+        val remaining = hasContainers.filter { it !== labelContainer }
+        val candidates = if (labels.size == 1) {
+            graph.verticesWithLabel(labels[0])
         } else {
-            filterToArray(graph.vertices())
+            labels.flatMap { graph.verticesWithLabel(it) }
+        }
+        return filterToArray(candidates.iterator(), remaining)
+    }
+
+    /**
+     * Returns the labels [container] restricts to, if the per-label index can satisfy it alone.
+     *
+     * Only label equality (`hasLabel(x)`) and label membership (`hasLabel(x, y, …)`, which
+     * Gremlin compiles to `within`) qualify; anything else — `neq`, `without`, a regex, or a
+     * value that is not a plain label string — returns `null` and is left to the ordinary
+     * filter pass. Buckets are disjoint, so a multi-label lookup needs no de-duplication.
+     *
+     * @param container The container to inspect.
+     * @return The labels to look up, or `null` if this container is not index-satisfiable.
+     */
+    private fun indexableLabels(container: HasContainer): List<String>? {
+        if (container.key != T.label.accessor) return null
+        return when (container.biPredicate) {
+            Compare.eq -> (container.value as? String)?.let { listOf(it) }
+            Contains.within -> {
+                val values = container.value as? Collection<*> ?: return null
+                if (values.isEmpty() || values.any { it !is String }) null
+                else values.map { it as String }
+            }
+            else -> null
         }
     }
 
@@ -71,30 +113,33 @@ class MdeoGraphStep<S, E : Element>(
         if (this.ids == null) return Collections.emptyIterator()
 
         return if (this.ids.isNotEmpty()) {
-            filterToArray(graph.edges(*this.ids))
+            filterToArray(graph.edges(*this.ids), hasContainers)
         } else {
-            filterToArray(graph.edges())
+            filterToArray(graph.edges(), hasContainers)
         }
     }
 
     /**
-     * Filters elements from the source iterator using [hasContainers] and returns
+     * Filters elements from the source iterator using [containers] and returns
      * an array-backed iterator.
      *
      * The source iterator is fully consumed into a filtered array. Since the array
      * is never modified, its length serves as the natural stop condition, avoiding
-     * exception-based flow control entirely.
+     * exception-based flow control entirely. Consuming it eagerly also means the whole
+     * candidate set is decided before any traverser reaches a downstream step, so a
+     * traversal that modifies the graph cannot disturb an in-flight scan.
      *
      * @param T The element type.
      * @param source The source iterator to filter.
+     * @param containers The constraints every returned element must satisfy.
      * @return An [ArrayIterator] over the filtered elements, or an empty iterator.
      */
     @Suppress("UNCHECKED_CAST")
-    private fun <T : Element> filterToArray(source: Iterator<T>): Iterator<T> {
+    private fun <T : Element> filterToArray(source: Iterator<T>, containers: List<HasContainer>): Iterator<T> {
         val filtered = mutableListOf<T>()
         while (source.hasNext()) {
             val elem = source.next()
-            if (HasContainer.testAll(elem, hasContainers)) {
+            if (HasContainer.testAll(elem, containers)) {
                 filtered.add(elem)
             }
         }

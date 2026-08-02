@@ -127,17 +127,18 @@ class SubprocessRunner(
     /**
      * Sends a channel message to the subprocess.
      *
+     * A failure is raised rather than logged: callers that expect an answer register for it
+     * before sending, so a send that quietly did nothing leaves them waiting on a message the
+     * subprocess never received.
+     *
      * @param payload The message data to send.
+     * @throws IOException if the message could not be written to the subprocess.
      */
     fun sendChannelMessage(payload: ByteArray) {
         val id = channelIdCounter.incrementAndGet()
-        val out = processOutput ?: return
-        try {
-            synchronized(out) {
-                SubprocessMessage.write(out, SubprocessMessage.Channel(id, payload))
-            }
-        } catch (e: IOException) {
-            logger.warn("Failed to send channel message id={}: {}", id, e.message)
+        val out = processOutput ?: throw IOException("Subprocess not started")
+        synchronized(out) {
+            SubprocessMessage.write(out, SubprocessMessage.Channel(id, payload))
         }
     }
 

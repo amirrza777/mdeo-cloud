@@ -1,6 +1,6 @@
 import type { ValidationAcceptor, ValidationChecks, AstNode, MultiMap as MultiMapType } from "langium";
 import type { ExtendedLangiumServices } from "@mdeo/language-common";
-import { Property, resolveClassChain, type ClassType, type PropertyType } from "@mdeo/language-metamodel";
+import { MetaModel, Property, resolveClassChain, type ClassType, type PropertyType } from "@mdeo/language-metamodel";
 import { BaseModelValidator } from "@mdeo/language-model";
 import {
     MatchStatement,
@@ -29,7 +29,7 @@ import {
     type ElseIfBranchType,
     type IfMatchStatementType
 } from "../grammar/modelTransformationTypes.js";
-import { resolveRelativeDocument, sharedImport } from "@mdeo/language-shared";
+import { climbsAboveProjectRoot, resolveRelativeDocument, sharedImport } from "@mdeo/language-shared";
 
 const { MultiMap, AstUtils } = sharedImport("langium");
 
@@ -124,7 +124,8 @@ export class ModelTransformationValidator extends BaseModelValidator {
     }
 
     /**
-     * Checks that the metamodel path in a `using` declaration resolves to an existing document.
+     * Checks that the metamodel path in a `using` declaration resolves to an existing document
+     * that actually holds a metamodel.
      *
      * @param transformation The model transformation whose import declaration is validated
      * @param accept The validation acceptor
@@ -137,10 +138,28 @@ export class ModelTransformationValidator extends BaseModelValidator {
         }
 
         const document = AstUtils.getDocument(transformation);
+
+        if (climbsAboveProjectRoot(document, file)) {
+            accept("error", `Metamodel path '${file}' points outside the project.`, {
+                node: metamodelImport,
+                property: "file"
+            });
+            return;
+        }
+
         const targetDoc = resolveRelativeDocument(document, file, this.services.shared.workspace.LangiumDocuments);
 
         if (targetDoc == undefined) {
             accept("error", `Cannot resolve metamodel path '${file}'. The file does not exist or is not loaded.`, {
+                node: metamodelImport,
+                property: "file"
+            });
+            return;
+        }
+
+        const root = targetDoc.parseResult?.value;
+        if (root == undefined || root.$type !== MetaModel.name) {
+            accept("error", `The path '${file}' does not point to a metamodel file.`, {
                 node: metamodelImport,
                 property: "file"
             });

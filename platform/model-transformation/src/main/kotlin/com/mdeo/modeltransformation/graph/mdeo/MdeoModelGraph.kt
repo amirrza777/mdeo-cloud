@@ -6,8 +6,10 @@ import com.mdeo.metamodel.ModelBinarySerializer
 import com.mdeo.metamodel.ModelInstance
 import com.mdeo.metamodel.SerializedModel
 import com.mdeo.metamodel.data.ModelData
+
 import com.mdeo.modeltransformation.graph.ModelGraph
 import com.mdeo.modeltransformation.graph.ModelMetadata
+import com.mdeo.modeltransformation.graph.ModelStatistics
 import com.mdeo.modeltransformation.graph.VertexRef
 import com.mdeo.modeltransformation.runtime.InstanceNameRegistry
 import org.apache.tinkerpop.gremlin.process.traversal.dsl.graph.GraphTraversal
@@ -45,6 +47,13 @@ class MdeoModelGraph private constructor(
 
     override val nameRegistry: InstanceNameRegistry
         get() = instanceNameRegistry
+
+    /**
+     * [MdeoGraph] maintains exact label counters as vertices and edges are added and removed,
+     * so no scan of the graph is ever needed here.
+     */
+    override val statistics: ModelStatistics
+        get() = graph.labelStatistics()
 
     override fun createVertexRef(rawId: Any): VertexRef {
         val ref = VertexRef(rawId)
