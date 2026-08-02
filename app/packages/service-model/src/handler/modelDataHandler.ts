@@ -1,17 +1,76 @@
-import { type ModelData, type ModelServices, ModelDataConverter, Model, getWrapperInterfaceName } from "@mdeo/language-model";
 import {
-    type MetamodelClassInfo,
-    type MetamodelPropertyInfo,
-    type CsvImportBlockType,
-    importCsvEntries
-} from "@mdeo/language-model-csv";
-import { hasErrors, type FileDataHandler } from "@mdeo/service-common";
+    type ModelData,
+    type ModelServices,
+    ModelDataConverter,
+    Model,
+    ModelContributionPlugin,
+    getWrapperInterfaceName
+} from "@mdeo/language-model";
+import type {
+    MetamodelClassInfo,
+    MetamodelPropertyInfo,
+    ModelPluginData,
+    ModelPluginRequestBody,
+    ModelPluginRequestResponse
+} from "@mdeo/service-model-common";
+import { MODEL_PLUGIN_REQUEST_KEY } from "@mdeo/service-model-common";
+import { hasErrors, type FileDataHandler, type FileDependency, type DataDependency } from "@mdeo/service-common";
 import { resolveRelativePath } from "@mdeo/language-shared";
+import type { AstNode } from "langium";
 
 export const MODEL_DATA_HANDLER_KEY = "model-data";
 
+/**
+ * Extracts a flat description of a metamodel's classes for import plugins.
+ *
+ * Import plugins map their own source data onto the metamodel but have no access
+ * to the metamodel document, so this is sent to them as plain data.
+ *
+ * @param metamodelAst The parsed metamodel document root
+ * @returns One entry per class declared in the metamodel
+ */
+function extractMetamodelClasses(metamodelAst: { elements?: unknown[] } | undefined): MetamodelClassInfo[] {
+    return ((metamodelAst?.elements ?? []) as any[])
+        .filter((element) => element.$type === "Class")
+        .map(
+            (cls): MetamodelClassInfo => ({
+                name: cls.name,
+                properties: (cls.properties ?? []).map((prop: any): MetamodelPropertyInfo => {
+                    const primitiveType = prop.type?.name;
+                    const enumRef = prop.type?.enum?.ref;
+                    const isReference = prop.$type === "AssociationEnd";
+                    return {
+                        name: prop.name,
+                        type: isReference
+                            ? "reference"
+                            : enumRef
+                              ? "enum"
+                              : ((primitiveType ?? "string") as MetamodelPropertyInfo["type"]),
+                        enumEntries: enumRef ? enumRef.entries?.map((entry: any) => entry.name) : undefined,
+                        isReference,
+                        referencedClass: isReference ? prop.class?.ref?.name : undefined
+                    };
+                })
+            })
+        );
+}
+
+/**
+ * File-data handler that computes the structured data for a model file.
+ *
+ * Hand-authored objects and links are converted directly. Imported data is not:
+ * the model service has no knowledge of any particular import format, so for
+ * each contribution plugin whose import appears in the file it forwards that
+ * import block's own source text to the plugin's language service and merges
+ * back the instances and links the plugin returns. This mirrors how the config
+ * service delegates each section to the plugin that contributes it, and keeps
+ * the model service independent of CSV or any other future import format.
+ *
+ * Returns `null` when the document has errors, or when any plugin reports that
+ * it could not produce a valid result.
+ */
 export const modelDataHandler: FileDataHandler<ModelData | null, ModelServices> = async (context) => {
-    const { instance, fileInfo, serverApi } = context;
+    const { instance, fileInfo, serverApi, contributionPlugins } = context;
 
     if (fileInfo == undefined) {
         return {
@@ -36,14 +95,15 @@ export const modelDataHandler: FileDataHandler<ModelData | null, ModelServices> 
         throw new Error("Document root is not a Model");
     }
 
-    const csvImport = model.imports?.find((imp) => (imp as { $type?: string }).$type === getWrapperInterfaceName("CSV"));
-    const csvImportContent = (csvImport as { content?: CsvImportBlockType } | undefined)?.content;
+    const converter = new ModelDataConverter(reflection);
+    const handAuthored = converter.convertModel(model);
 
-    if (csvImportContent == undefined) {
-        const converter = new ModelDataConverter(reflection);
-        const modelData = converter.convertModel(model);
+    const modelImports = (model.imports ?? []) as (AstNode & { content?: AstNode })[];
+    const activeModelPlugins = contributionPlugins.filter(ModelContributionPlugin.is);
+
+    if (modelImports.length === 0 || activeModelPlugins.length === 0) {
         return {
-            data: modelData,
+            data: handAuthored,
             ...serverApi.getTrackedRequests()
         };
     }
@@ -59,51 +119,72 @@ export const modelDataHandler: FileDataHandler<ModelData | null, ModelServices> 
         return { data: null, ...serverApi.getTrackedRequests() };
     }
 
-    const metamodelAst = metamodelDoc.parseResult?.value as any;
-    const metamodelClasses: MetamodelClassInfo[] = (metamodelAst?.elements ?? [])
-        .filter((el: any) => el.$type === "Class")
-        .map((cls: any): MetamodelClassInfo => ({
-            name: cls.name,
-            properties: (cls.properties ?? []).map((prop: any): MetamodelPropertyInfo => {
-                const primitiveType = prop.type?.name;
-                const enumRef = prop.type?.enum?.ref;
-                const isReference = prop.$type === "AssociationEnd";
-                return {
-                    name: prop.name,
-                    type: isReference ? "reference"
-                        : enumRef ? "enum"
-                        : (primitiveType ?? "string") as MetamodelPropertyInfo["type"],
-                    enumEntries: enumRef ? enumRef.entries?.map((e: any) => e.name) : undefined,
-                    isReference,
-                    referencedClass: isReference ? prop.class?.ref?.name : undefined
-                };
-            })
-        }));
+    const metamodelClasses = extractMetamodelClasses(metamodelDoc.parseResult?.value as { elements?: unknown[] });
 
-    const csvEntries = await Promise.all(
-        csvImportContent.imports.map(async (entry: any) => {
-            const csvPath: string = resolveRelativePath(document, entry.file).path;
-            const { content } = await serverApi.readFile(csvPath);
+    const importedInstances: ModelData["instances"] = [];
+    const importedLinks: ModelData["links"] = [];
+    const accumulatedFileDeps: FileDependency[] = [];
+    const accumulatedDataDeps: DataDependency[] = [];
+
+    for (const plugin of activeModelPlugins) {
+        const partialBlocks: string[] = [];
+        for (const contributedImport of plugin.imports) {
+            const wrapperType = getWrapperInterfaceName(contributedImport.name);
+            for (const modelImport of modelImports) {
+                if (modelImport.$type !== wrapperType) {
+                    continue;
+                }
+                const contentText = modelImport.content?.$cstNode?.text ?? "";
+                if (contentText !== "") {
+                    partialBlocks.push(`import ${contributedImport.name} ${contentText}`);
+                }
+            }
+        }
+
+        if (partialBlocks.length === 0) {
+            continue;
+        }
+
+        const requestBody: ModelPluginRequestBody = {
+            text: `using "${metamodelPath}"\n\n${partialBlocks.join("\n")}`,
+            modelFileUri: fileInfo.uri.toString(),
+            metamodelPath,
+            metamodelClasses
+        };
+
+        const rawPluginResult = await serverApi.sendPluginRequest(
+            plugin.languageKey,
+            MODEL_PLUGIN_REQUEST_KEY,
+            requestBody
+        );
+        const pluginResponse = rawPluginResult as ModelPluginRequestResponse<ModelPluginData>;
+
+        accumulatedFileDeps.push(...(pluginResponse?.fileDependencies ?? []));
+        accumulatedDataDeps.push(...(pluginResponse?.dataDependencies ?? []));
+
+        if (pluginResponse?.data == null) {
+            const trackedRequests = serverApi.getTrackedRequests();
             return {
-                className: entry.class?.ref?.name ?? "",
-                csvText: content
+                data: null,
+                fileDependencies: [...trackedRequests.fileDependencies, ...accumulatedFileDeps],
+                dataDependencies: [...trackedRequests.dataDependencies, ...accumulatedDataDeps]
             };
-        })
-    );
+        }
 
-    const result = importCsvEntries(csvEntries, metamodelClasses);
-
-    const converter = new ModelDataConverter(reflection);
-    const handAuthored = converter.convertModel(model);
+        importedInstances.push(...(pluginResponse.data.instances ?? []));
+        importedLinks.push(...(pluginResponse.data.links ?? []));
+    }
 
     const modelData: ModelData = {
         metamodelPath,
-        instances: [...handAuthored.instances, ...result.instances],
-        links: [...handAuthored.links, ...result.links]
+        instances: [...handAuthored.instances, ...importedInstances],
+        links: [...handAuthored.links, ...importedLinks]
     };
 
+    const trackedRequests = serverApi.getTrackedRequests();
     return {
         data: modelData,
-        ...serverApi.getTrackedRequests()
+        fileDependencies: [...trackedRequests.fileDependencies, ...accumulatedFileDeps],
+        dataDependencies: [...trackedRequests.dataDependencies, ...accumulatedDataDeps]
     };
 };
