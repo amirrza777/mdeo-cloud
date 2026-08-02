@@ -513,6 +513,10 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
         const validatedMetadata = await this.modelState.getValidatedMetadata();
 
         let nodeIndex = 0;
+        // Numbered per class rather than per import, so two imports of the same
+        // class from different files do not produce the same instance names.
+        // Matches how the import itself names them.
+        const rowsPerClass = new Map<string, number>();
         for (const entry of csvImportContent.imports) {
             const classRef = entry.class?.ref as ClassType | undefined;
             if (classRef == undefined) continue;
@@ -524,8 +528,10 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
                 const classChain = resolveClassChain(classRef, this.reflection);
                 const classHierarchy = classChain.map((c) => c.name);
                 const columns = this.resolveCsvColumns(rows[0], classChain);
+                const nameOffset = rowsPerClass.get(classRef.name) ?? 0;
+                rowsPerClass.set(classRef.name, nameOffset + rows.length - 1);
                 rows.slice(1).forEach((row: string[], rowIndex: number) => {
-                    const instanceName = `${classRef.name}_${rowIndex}`;
+                    const instanceName = `${classRef.name}_${nameOffset + rowIndex}`;
                     const nodeId = `csv-node-${nodeIndex++}`;
                     const metadata = validatedMetadata.nodes[nodeId]?.meta ?? {};
                     const node = GObjectNode.builder()
