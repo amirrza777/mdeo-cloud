@@ -13,7 +13,7 @@ import {
 import type { ModelIdRegistry, GraphMetadata } from "@mdeo/language-shared";
 import type { NodeLayoutMetadata, EdgeLayoutMetadata } from "@mdeo/protocol-common";
 import { ID } from "@mdeo/language-common";
-import { resolveClassChain, type ClassType } from "@mdeo/language-metamodel";
+import { resolveClassChain, type ClassType, type PropertyType } from "@mdeo/language-metamodel";
 import type {
     PartialModel,
     PartialObjectInstance,
@@ -41,6 +41,20 @@ const { injectable } = sharedImport("inversify");
 const { GGraph } = sharedImport("@eclipse-glsp/server");
 
 type GGraphType = ReturnType<typeof GGraph.builder>["proxy"];
+
+/**
+ * Reserved CSV column holding a row's identifier for cross-object references.
+ * It is not a metamodel property, so it is never displayed as one.
+ */
+const CSV_ID_COLUMN = "_id";
+
+/**
+ * A CSV column that maps onto a metamodel property of the imported class.
+ */
+interface CsvColumnBinding {
+    index: number;
+    property: PropertyType;
+}
 
 /**
  * Factory for creating GLSP graph models from model AST.
@@ -499,8 +513,10 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
                 const csvContent = await this.modelState.languageServices.shared.workspace.FileSystemProvider.readFile(uri);
                 const rows = parseCsv(csvContent);
                 if (rows.length < 2) continue;
-                const classHierarchy = resolveClassChain(classRef, this.reflection).map((c) => c.name);
-                rows.slice(1).forEach((_row: string[], rowIndex: number) => {
+                const classChain = resolveClassChain(classRef, this.reflection);
+                const classHierarchy = classChain.map((c) => c.name);
+                const columns = this.resolveCsvColumns(rows[0], classChain);
+                rows.slice(1).forEach((row: string[], rowIndex: number) => {
                     const instanceName = `${classRef.name}_${rowIndex}`;
                     const nodeId = `csv-node-${nodeIndex++}`;
                     const metadata = validatedMetadata.nodes[nodeId]?.meta ?? {};
@@ -511,7 +527,10 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
                         .classHierarchy(classHierarchy)
                         .meta(metadata)
                         .build();
-                    node.children.push(...this.createObjectHeader(nodeId, instanceName, classRef.name));
+                    node.children.push(
+                        ...this.createObjectHeader(nodeId, instanceName, classRef.name),
+                        ...this.createCsvPropertyAssignments(nodeId, columns, row)
+                    );
                     graph.children.push(node);
                 });
             } catch {
@@ -520,4 +539,132 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
         }
     }
 
+    /**
+     * Resolves which CSV columns correspond to properties of the imported class.
+     *
+     * Columns are matched to properties by name across the class' whole extension
+     * chain, mirroring how the import itself resolves them. Unmatched columns and
+     * the reserved `_id` row identifier are dropped, so they are simply not shown.
+     *
+     * @param header The CSV header row
+     * @param classChain The imported class and its extended classes
+     * @returns The column index and property for every column that maps to one
+     */
+    private resolveCsvColumns(header: string[], classChain: ClassType[]): CsvColumnBinding[] {
+        const propertiesByName = new Map<string, PropertyType>();
+        for (const cls of classChain) {
+            for (const property of cls.properties ?? []) {
+                if (property?.name != undefined && !propertiesByName.has(property.name)) {
+                    propertiesByName.set(property.name, property);
+                }
+            }
+        }
+
+        const columns: CsvColumnBinding[] = [];
+        header.forEach((columnName, index) => {
+            if (columnName === CSV_ID_COLUMN) {
+                return;
+            }
+            const property = propertiesByName.get(columnName);
+            if (property != undefined) {
+                columns.push({ index, property });
+            }
+        });
+        return columns;
+    }
+
+    /**
+     * Creates the property assignments compartment for a CSV-imported node.
+     *
+     * Mirrors {@link createPropertyAssignments}, but reads values straight from a
+     * CSV row instead of from property assignment AST nodes, since CSV-imported
+     * instances have no backing AST. The labels are read-only because editing them
+     * could not be written back to the CSV file.
+     *
+     * @param nodeId The ID of the object node
+     * @param columns The columns that map to properties, from {@link resolveCsvColumns}
+     * @param row The CSV data row for this node
+     * @returns Array of GModelElements for the properties compartment
+     */
+    private createCsvPropertyAssignments(
+        nodeId: string,
+        columns: CsvColumnBinding[],
+        row: string[]
+    ): GModelElement[] {
+        const propertyLabels: GPropertyLabel[] = [];
+        for (const { index, property } of columns) {
+            const rawValue = row[index];
+            if (rawValue == undefined || rawValue.trim() === "") {
+                continue;
+            }
+            const propertyName = this.modelState.languageServices.AstSerializer.serializePrimitive(
+                { value: property.name },
+                ID
+            );
+            propertyLabels.push(
+                GPropertyLabel.builder()
+                    .id(`${nodeId}__prop-${index}`)
+                    .text(`${propertyName} = ${this.formatCsvValue(rawValue, property)}`)
+                    .readonly(true)
+                    .build()
+            );
+        }
+
+        if (propertyLabels.length === 0) {
+            return [];
+        }
+
+        const divider = GHorizontalDivider.builder().type(ModelElementType.DIVIDER).id(`${nodeId}__divider`).build();
+        const propertiesCompartment = GCompartment.builder()
+            .type(ModelElementType.COMPARTMENT)
+            .id(`${nodeId}__properties-compartment`)
+            .build();
+        propertiesCompartment.children.push(...propertyLabels);
+
+        return [divider, propertiesCompartment];
+    }
+
+    /**
+     * Formats a raw CSV cell for display, following the property's declared type.
+     *
+     * Uses the same type interpretation as the CSV import itself, so the diagram
+     * shows the value the import would produce, and renders it the same way
+     * hand-authored values are rendered. Values that don't parse as their declared
+     * numeric type fall back to being shown as text rather than as `NaN`.
+     *
+     * @param rawValue The raw cell text
+     * @param property The metamodel property the column maps to
+     * @returns The formatted value string
+     */
+    private formatCsvValue(rawValue: string, property: PropertyType): string {
+        const value = rawValue.trim();
+        const propertyType = property.type as
+            | { name?: string; enum?: { ref?: { name?: string }; $refText?: string } }
+            | undefined;
+
+        const enumName =
+            (propertyType?.enum?.ref as { name?: string } | undefined)?.name ??
+            (propertyType?.enum != undefined ? parseIdentifier(propertyType.enum.$refText ?? "?") : undefined);
+        if (enumName != undefined) {
+            const serializer = this.modelState.languageServices.AstSerializer;
+            return `${serializer.serializePrimitive({ value: enumName }, ID)}.${serializer.serializePrimitive({ value }, ID)}`;
+        }
+
+        switch (propertyType?.name) {
+            case "int":
+            case "long": {
+                const parsed = parseInt(value, 10);
+                return isNaN(parsed) ? `"${value}"` : String(parsed);
+            }
+            case "double":
+            case "float": {
+                const parsed = parseFloat(value);
+                return isNaN(parsed) ? `"${value}"` : String(parsed);
+            }
+            case "boolean":
+                return String(value.toLowerCase() === "true");
+            default:
+                return `"${value}"`;
+        }
+    }
 }
