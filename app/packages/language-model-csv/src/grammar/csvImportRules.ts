@@ -16,13 +16,12 @@ export const CsvColumnMappingRule = createRule("CsvColumnMappingRule")
     .as(({ set }) => [set("csvColumn", STRING), "=", set("property", ID)]);
 
 /**
- * The optional explicit mapping list is introduced by the "with" keyword,
- * the same way the model-transformation grammar disambiguates two adjacent
- * brace blocks in one rule (e.g. `match { pattern } then { block }`): the
- * keyword between them is what tells the parser which block it's entering,
- * not the bracket type. Reusing bare curly braces here, with nothing between
- * `file` and the mapping list's own "{", caused the parser to misread the
- * mapping list's opening brace as the start of a new class import.
+ * A class import, with an optional explicit column mapping block.
+ *
+ * The mapping block uses plain nested braces, like the nested blocks in the
+ * other DSLs. Nothing needs to separate it from `file`: the block can only
+ * start with "{", while the enclosing import list continues with an ID or ends
+ * with "}", so the parser can always tell which one it is from a single token.
  */
 export const CsvClassImportRule = createRule("CsvClassImportRule")
     .returns(CsvClassImport)
@@ -31,7 +30,7 @@ export const CsvClassImportRule = createRule("CsvClassImportRule")
         "from",
         set("file", STRING),
         optional(
-            group("with", "{", many(or(add("mappings", CsvColumnMappingRule), NEWLINE)), "}")
+            group("{", many(or(add("mappings", CsvColumnMappingRule), NEWLINE)), "}")
         )
     ]);
 

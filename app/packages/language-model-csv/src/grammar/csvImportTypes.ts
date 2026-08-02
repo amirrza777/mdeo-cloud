@@ -26,9 +26,9 @@ export type CsvColumnMappingType = ASTType<typeof CsvColumnMapping>;
  * Format:
  *   ClassName from "path/to/file.csv"
  * or, with an explicit mapping:
- *   ClassName from "path/to/file.csv" [
+ *   ClassName from "path/to/file.csv" {
  *     "csvColumnName" = modelPropertyName
- *   ]
+ *   }
  * When no mapping list is given, columns are matched to properties by name.
  */
 export const CsvClassImport = createInterface("CsvClassImport").attrs({
