@@ -27,6 +27,10 @@ export default defineConfig({
             "Cross-Origin-Opener-Policy": "same-origin",
             "Cross-Origin-Embedder-Policy": "require-corp"
         },
+        // Matched by prefix in declaration order, so a longer path has to come
+        // before any shorter path it starts with: model-transformation and
+        // model-csv before model, config-optimization and config-mdeo before
+        // config, and plain csv last.
         proxy: {
             "/plugin/model-transformation": {
                 target: "http://localhost:3003",
@@ -34,6 +38,14 @@ export default defineConfig({
                 secure: false,
                 ws: true,
                 rewrite: (path) => path.replace(/^\/plugin\/model-transformation/, ""),
+                configure: addCoopCoepHeaders
+            },
+            "/plugin/model-csv": {
+                target: "http://localhost:3007",
+                changeOrigin: true,
+                secure: false,
+                ws: true,
+                rewrite: (path) => path.replace(/^\/plugin\/model-csv/, ""),
                 configure: addCoopCoepHeaders
             },
             "/plugin/metamodel": {
@@ -82,6 +94,14 @@ export default defineConfig({
                 secure: false,
                 ws: true,
                 rewrite: (path) => path.replace(/^\/plugin\/config/, ""),
+                configure: addCoopCoepHeaders
+            },
+            "/plugin/csv": {
+                target: "http://localhost:3008",
+                changeOrigin: true,
+                secure: false,
+                ws: true,
+                rewrite: (path) => path.replace(/^\/plugin\/csv/, ""),
                 configure: addCoopCoepHeaders
             },
             "/api": {
