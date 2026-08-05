@@ -138,11 +138,25 @@ export const MetamodelFileImport = createInterface("MetamodelFileImport").attrs(
 export type MetamodelFileImportType = ASTType<typeof MetamodelFileImport>;
 
 /**
+ * Base interface for data imports contributed by plugins (e.g. CSV, and future formats).
+ * A contribution plugin wraps its own import block in an interface extending this one,
+ * the same way config sections extend `BaseConfigSection`.
+ */
+export const BaseModelImport = createInterface("BaseModelImport").attrs({});
+
+/**
+ * Type representing a BaseModelImport AST node.
+ */
+export type BaseModelImportType = ASTType<typeof BaseModelImport>;
+
+/**
  * Model root interface.
- * Contains metamodel imports, object instances, and links.
+ * Contains metamodel import, any number of plugin-contributed data imports (e.g. CSV),
+ * and hand-authored objects and links.
  */
 export const Model = createInterface("Model").attrs({
     import: MetamodelFileImport,
+    imports: [BaseModelImport],
     objects: [ObjectInstance],
     links: [Link]
 });

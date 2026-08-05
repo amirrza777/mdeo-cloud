@@ -13,6 +13,7 @@ import {
 } from "@mdeo/language-shared";
 import { ModelElementType } from "@mdeo/protocol-model";
 import type { PartialModel, PartialObjectInstance, PartialLink } from "../../grammar/modelPartialTypes.js";
+import { getWrapperInterfaceName } from "../../plugin/resolvePlugins.js";
 
 const { injectable, inject } = sharedImport("inversify");
 
@@ -63,8 +64,47 @@ export class ModelMetadataManager extends MetadataManager<PartialModel> {
 
         this.extractObjectMetadata(objects, idRegistry, nodes);
         this.extractLinkMetadata(links, idRegistry, edges, nodes);
+        this.extractCsvNodeMetadata(sourceModel, nodes);
 
         return { nodes, edges };
+    }
+
+    /**
+     * The metadata being validated by the current {@link validateMetadata} call.
+     *
+     * CSV node metadata has to be carried forward from the incoming metadata
+     * rather than derived from the model, but `extractGraphMetadata` only
+     * receives the source model, so this passes it down. It is scoped to a
+     * single call: it is restored in a `finally` block, so a nested or
+     * concurrent validation cannot see another document's metadata.
+     */
+    private storedCurrentMetadata: GraphMetadata | undefined;
+
+    override async validateMetadata(
+        sourceModel: PartialModel,
+        currentMetadata: GraphMetadata,
+        lastValidMetadata: GraphMetadata
+    ): Promise<GraphMetadata | undefined> {
+        const previousMetadata = this.storedCurrentMetadata;
+        this.storedCurrentMetadata = currentMetadata;
+        try {
+            return await super.validateMetadata(sourceModel, currentMetadata, lastValidMetadata);
+        } finally {
+            this.storedCurrentMetadata = previousMetadata;
+        }
+    }
+
+    private extractCsvNodeMetadata(sourceModel: PartialModel, nodes: Record<string, NodeMetadata>): void {
+        const hasCsvImport = sourceModel.imports?.some(
+            (imp) => (imp as { $type?: string }).$type === getWrapperInterfaceName("CSV")
+        );
+        if (!hasCsvImport) return;
+        if (this.storedCurrentMetadata == undefined) return;
+        for (const [id, meta] of Object.entries(this.storedCurrentMetadata.nodes)) {
+            if (id.startsWith("csv-node-") && !nodes[id]) {
+                nodes[id] = meta;
+            }
+        }
     }
 
     /**
