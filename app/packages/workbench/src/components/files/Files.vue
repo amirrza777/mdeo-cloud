@@ -124,7 +124,7 @@ import { workbenchStateKey } from "../workbench/util";
 import { Uri } from "vscode";
 import { FileType } from "@codingame/monaco-vscode-files-service-override";
 import { findFileInTree } from "@/data/filesystem/util";
-import { FolderIcon, FilePlusIcon, FolderPlusIcon, DownloadIcon } from "lucide-vue-next";
+import { FolderIcon, FilePlusIcon, FolderPlusIcon, DownloadIcon } from "@lucide/vue";
 import FileTypeIcon from "../FileTypeIcon.vue";
 import type { EditorTab } from "@/data/tab/editorTab";
 import { FileCategory, parseUri } from "@mdeo/language-common";

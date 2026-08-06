@@ -1,4 +1,4 @@
-import type { IconNode } from "lucide-vue-next";
+import type { IconNode } from "@lucide/vue";
 import type { languages } from "monaco-editor";
 
 /**

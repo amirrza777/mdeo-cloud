@@ -39,7 +39,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import Tree from "@/components/tree/Tree.vue";
 import TreeItem from "@/components/tree/TreeItem.vue";
 import type { User, ProjectUserInfo } from "@/data/api/backendApi";
-import { User as UserIcon } from "lucide-vue-next";
+import { User as UserIcon } from "@lucide/vue";
 import { workbenchStateKey } from "@/components/workbench/util";
 import { showApiError } from "@/lib/notifications";
 

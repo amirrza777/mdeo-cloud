@@ -55,7 +55,7 @@
 import { computed, inject } from "vue";
 import { TabsTrigger } from "reka-ui";
 import type { EditorTab } from "@/data/tab/editorTab";
-import { X } from "lucide-vue-next";
+import { X } from "@lucide/vue";
 import { cn } from "@/lib/utils";
 import FileTypeIcon from "../FileTypeIcon.vue";
 import { workbenchStateKey } from "../workbench/util";

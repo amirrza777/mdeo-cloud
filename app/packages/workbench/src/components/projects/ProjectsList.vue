@@ -92,7 +92,7 @@ import {
 } from "@/components/ui/dialog";
 import SidebarPanelHeader from "@/components/sidebar/SidebarPanelHeader.vue";
 import type { Project } from "@/data/project/project";
-import { Folder, Plus, X, Upload, FileArchive } from "lucide-vue-next";
+import { Folder, Plus, X, Upload, FileArchive } from "@lucide/vue";
 import { authStateKey, workbenchStateKey } from "../workbench/util";
 import { extractZip, type ImportedFile } from "@/lib/zip";
 import { showApiError } from "@/lib/notifications";

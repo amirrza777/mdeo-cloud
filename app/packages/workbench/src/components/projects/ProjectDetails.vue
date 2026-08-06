@@ -228,7 +228,7 @@ import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger } 
 import ManagePluginsDialog from "./ManagePluginsDialog.vue";
 import ManageUsersDialog from "./ManageUsersDialog.vue";
 import type { ProjectUserInfo } from "@/data/api/backendApi";
-import { Pencil, Trash2, Download, FolderOpen, User as UserIcon, Settings2, Icon } from "lucide-vue-next";
+import { Pencil, Trash2, Download, FolderOpen, User as UserIcon, Settings2, Icon } from "@lucide/vue";
 import { workbenchStateKey } from "@/components/workbench/util";
 import type { WorkbenchPlugin } from "@/data/plugin/plugin";
 import { showApiError } from "@/lib/notifications";

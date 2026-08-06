@@ -107,7 +107,7 @@
 
 <script setup lang="ts">
 import { ref, inject, computed } from "vue";
-import { FolderIcon, EditIcon, Trash2Icon, DownloadIcon, Icon } from "lucide-vue-next";
+import { FolderIcon, EditIcon, Trash2Icon, DownloadIcon, Icon } from "@lucide/vue";
 import TreeItem from "@/components/tree/TreeItem.vue";
 import TreeItemInput from "../tree/TreeItemInput.vue";
 import FileSystemItemList from "./FileSystemItemList.vue";

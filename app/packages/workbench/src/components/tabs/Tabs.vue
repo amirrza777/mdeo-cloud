@@ -63,7 +63,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import { TabsRoot, TabsList } from "reka-ui";
-import { CircleQuestionMark, Icon } from "lucide-vue-next";
+import { CircleQuestionMark, Icon } from "@lucide/vue";
 import FileTab from "./FileTab.vue";
 import type { EditorTab } from "@/data/tab/editorTab";
 import { Separator } from "../ui/separator";
