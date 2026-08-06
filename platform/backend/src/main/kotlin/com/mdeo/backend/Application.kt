@@ -6,6 +6,7 @@ import com.mdeo.backend.config.configureSerialization
 import com.mdeo.backend.config.configureStatusPages
 import com.mdeo.backend.database.DatabaseFactory
 import com.mdeo.backend.plugins.*
+import com.mdeo.backend.git.GitRepositoryService
 import com.mdeo.backend.routes.*
 import com.mdeo.backend.service.*
 import io.ktor.server.application.*
@@ -60,6 +61,7 @@ fun Application.module(appConfig: AppConfig) {
         override val executionService: ExecutionService by lazy { ExecutionService(this) }
         override val webSocketNotificationService: WebSocketNotificationService by lazy { WebSocketNotificationService() }
         override val languagePluginRequestService: LanguagePluginRequestService by lazy { LanguagePluginRequestService(this) }
+        val gitRepositoryService: GitRepositoryService by lazy { GitRepositoryService() }
     }
     
     services.jwtService.init()
@@ -107,6 +109,11 @@ fun Application.module(appConfig: AppConfig) {
     routing {
         healthRoutes()
         authRoutes(services.userService, services.jwtService)
+
+        // Outside the session and JWT blocks on purpose: git clients cannot
+        // present either, so these routes authenticate the HTTP basic
+        // credentials themselves.
+        gitRoutes(services.gitRepositoryService, services.projectService, services.userService)
         
         authenticate(AUTH_SESSION, AUTH_JWT, optional = true) {
             fileRoutes(services.fileService, services.projectService)
