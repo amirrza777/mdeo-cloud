@@ -20,7 +20,7 @@
                                 align="start"
                                 @open-auto-focus="handleNewFileMenuOpenAutoFocus"
                                 @close-auto-focus="$event.preventDefault()"
-                                @focus-outside="$event.preventDefault()"
+                                @focus-outside="handleNewFileMenuFocusOutside"
                                 @mouseenter="openNewFileMenu"
                                 @mouseleave="scheduleCloseNewFileMenu"
                             >
@@ -354,6 +354,17 @@ function openNewFileMenu() {
  * navigated with the arrow keys.
  */
 function handleNewFileMenuOpenAutoFocus(event: Event) {
+    if (newFileMenuOpenedByHover.value) {
+        event.preventDefault();
+    }
+}
+
+/**
+ * Only keeps the menu open on focus changes outside of it if it was opened by hovering, where the
+ * focus was intentionally left where it was. A menu opened via keyboard has the focus inside it, so
+ * moving the focus away has to dismiss it as usual.
+ */
+function handleNewFileMenuFocusOutside(event: Event) {
     if (newFileMenuOpenedByHover.value) {
         event.preventDefault();
     }
