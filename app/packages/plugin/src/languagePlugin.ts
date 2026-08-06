@@ -61,6 +61,11 @@ export interface LanguagePlugin {
      * Indicates whether this language was generated automatically
      */
     isGenerated: boolean;
+    /**
+     * URL of the documentation for this language, opened from the editor.
+     * If undefined, no documentation is linked.
+     */
+    documentationUrl?: string;
 }
 
 /**
@@ -111,3 +116,8 @@ export interface LanguageServerPlugin {
      */
     import: string;
 }
+
+/**
+ * Base URL of the MDEO Cloud documentation, used to build the documentationUrl of the bundled languages.
+ */
+export const DOCUMENTATION_BASE_URL = "https://mde-optimiser.github.io/mdeo-cloud";

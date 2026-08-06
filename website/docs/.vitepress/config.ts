@@ -6,7 +6,6 @@ const repository = "https://github.com/mde-optimiser/mdeo-cloud";
 export default defineConfig({
     title: "MDEO Cloud",
     description: "A cloud-native, plugin-based platform for model-driven engineering optimisation.",
-    // The site is published to GitHub Pages under https://<owner>.github.io/mdeo-cloud/.
     base: "/mdeo-cloud/",
     cleanUrls: true,
     lastUpdated: true,
@@ -62,7 +61,9 @@ export default defineConfig({
                         { text: "Script", link: "/plugins/script" },
                         { text: "Config", link: "/plugins/config" },
                         { text: "Config Optimization", link: "/plugins/config-optimization" },
-                        { text: "Config MDEO", link: "/plugins/config-mdeo" }
+                        { text: "Config MDEO", link: "/plugins/config-mdeo" },
+                        { text: "CSV", link: "/plugins/csv" },
+                        { text: "Model CSV", link: "/plugins/model-csv" }
                     ]
                 }
             ],

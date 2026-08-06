@@ -52,6 +52,7 @@ const icon = convertIcon(Network);
   "extension": ".mm",
   "newFileAction": false,
   "isGenerated": false,
+  "documentationUrl": "https://mde-optimiser.github.io/mdeo-cloud/plugins/metamodel",
   "icon": [["path", { "d": "M12 2v4" }]],
   "serverPlugin": { "import": "static/language.js" },
   "graphicalEditorPlugin": {
@@ -77,6 +78,7 @@ const icon = convertIcon(Network);
 | `textualEditorPlugin` | object | — | Omit for languages without a text editor |
 | `icon` | icon node | ✅ | Icon shown for files of this language |
 | `isGenerated` | boolean | ✅ | Marks a language whose files the platform produces rather than the user |
+| `documentationUrl` | string | — | Documentation for the language. The workbench shows a question mark next to the editor title actions which opens it in a new tab; omit it and no such button appears |
 
 ### Relative paths and versioning
 

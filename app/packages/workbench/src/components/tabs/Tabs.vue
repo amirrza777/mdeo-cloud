@@ -20,7 +20,10 @@
                     </TabsList>
                 </TabsRoot>
             </ScrollArea>
-            <div v-if="editorTitleActions.length > 0" class="flex items-center gap-1 px-2 shrink-0">
+            <div
+                v-if="editorTitleActions.length > 0 || documentationUrl != undefined"
+                class="flex items-center gap-1 px-2 shrink-0"
+            >
                 <TooltipProvider>
                     <Tooltip v-for="action in editorTitleActions" :key="action.key">
                         <TooltipTrigger as-child>
@@ -30,6 +33,24 @@
                         </TooltipTrigger>
                         <TooltipContent>
                             <p>{{ action.name }}</p>
+                        </TooltipContent>
+                    </Tooltip>
+                    <Tooltip v-if="documentationUrl != undefined">
+                        <TooltipTrigger as-child>
+                            <Button
+                                as="a"
+                                variant="ghost"
+                                size="icon"
+                                class="size-7"
+                                :href="documentationUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                            >
+                                <CircleQuestionMark class="size-4" />
+                            </Button>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                            <p>Documentation</p>
                         </TooltipContent>
                     </Tooltip>
                 </TooltipProvider>
@@ -42,7 +63,7 @@
 <script setup lang="ts">
 import { computed, inject, nextTick, onMounted, onUnmounted, ref, useTemplateRef, watch } from "vue";
 import { TabsRoot, TabsList } from "reka-ui";
-import { Icon } from "lucide-vue-next";
+import { CircleQuestionMark, Icon } from "lucide-vue-next";
 import FileTab from "./FileTab.vue";
 import type { EditorTab } from "@/data/tab/editorTab";
 import { Separator } from "../ui/separator";
@@ -76,6 +97,18 @@ const fileActions = ref<FileAction[]>([]);
 const editorTitleActions = computed(() =>
     fileActions.value.filter((action) => action.displayLocations.includes(ActionDisplayLocation.EDITOR_TITLE))
 );
+
+/**
+ * Documentation of the language of the active file, undefined if the language provides none
+ */
+const documentationUrl = computed(() => {
+    const tab = activeTab.value;
+    if (tab == undefined) {
+        return undefined;
+    }
+    const extension = getFileExtension(tab.fileUri.path.split("/").pop() ?? "");
+    return languagePluginByExtension.value.get(extension)?.documentationUrl;
+});
 
 /**
  * Gets a unique key for a tab for Vue's v-for

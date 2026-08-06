@@ -130,6 +130,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { type FileSystemNode } from "@/data/filesystem/file";
 import type { NewItemState } from "./FileSystemItemList.vue";
+import { newFileSystemItemStateKey } from "./util";
 import type { ResolvedWorkbenchLanguagePlugin } from "@/data/plugin/plugin";
 import { workbenchStateKey } from "@/components/workbench/util";
 import { treeContextKey } from "../tree/util";
@@ -171,8 +172,35 @@ const emit = defineEmits<{
 
 const isRenaming = ref(false);
 const showDeleteDialog = ref(false);
-const newItem = ref<NewItemState>();
 const fileActions = ref<FileAction[]>([]);
+
+const newFileSystemItemState = inject(newFileSystemItemStateKey)!;
+
+/**
+ * The new item to create, only set if this entry is the folder it is created in
+ */
+const newItem = computed<NewItemState | undefined>({
+    get() {
+        return isNewItemParent() ? newFileSystemItemState.value : undefined;
+    },
+    set(value) {
+        if (value == undefined) {
+            if (isNewItemParent()) {
+                newFileSystemItemState.value = undefined;
+            }
+        } else if (props.entry.type === FileType.Directory) {
+            newFileSystemItemState.value = { ...value, parent: props.entry };
+        }
+    }
+});
+
+/**
+ * Checks if the item currently being created is created in this entry
+ */
+function isNewItemParent(): boolean {
+    const state = newFileSystemItemState.value;
+    return state != undefined && state.parent.uri.toString() === props.entry.uri.toString();
+}
 
 const contextMenuActions = computed(() =>
     fileActions.value.filter((action) => action.displayLocations.includes(ActionDisplayLocation.CONTEXT_MENU))
@@ -182,7 +210,6 @@ const entryErrorCount = computed(() => {
     if (props.entry.type === FileType.File) {
         return diagnosticStore.fileDiagnostics.value.get(props.entry.uri.toString())?.errors ?? 0;
     }
-    // For folders, aggregate error counts from all descendant files
     const prefix = props.entry.uri.toString() + "/";
     let total = 0;
     for (const [uri, summary] of diagnosticStore.fileDiagnostics.value) {

@@ -19,13 +19,13 @@ configuration that does not ship with a known password.
 :::
 
 The quick-start compose file pulls prebuilt images and only exposes the workbench on port `4242`.
-Everything else — the backend, the seven plugin services, the execution services and their databases
+Everything else — the backend, the plugin services, the execution services and their databases
 — runs on the internal network.
 
 ## First look around
 
 1. **Create a project.** Projects own files, plugins and executions. A new project gets every plugin
-   that an administrator marked as *default*, which by default is all seven.
+   that an administrator marked as *default*, which by default is all of the bundled ones.
 2. **Add files.** Use the file tree to create a `.mm` metamodel. The moment you save, the metamodel
    is parsed and validated, and a diagram view becomes available next to the text.
 3. **Run something.** Files whose language supports it get a run action. Executions appear in the
@@ -47,7 +47,7 @@ This build also exposes the internal ports, which is what you want while debuggi
 | --- | --- |
 | 4242 | Workbench |
 | 8080 | Backend API |
-| 3001–3007 | Plugin services (metamodel, model, script, model-transformation, config, config-optimization, config-mdeo) |
+| 3001–3008 | Plugin services (metamodel, model, script, model-transformation, config, config-optimization, model-csv, config-mdeo) |
 | 5432–5435 | PostgreSQL instances (backend, script, model-transformation, optimizer) |
 
 For iterating on the frontend without Docker, see [Local development](/develop/local-development).

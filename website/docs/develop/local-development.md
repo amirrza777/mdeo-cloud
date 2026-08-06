@@ -21,7 +21,9 @@ Builds every image from the checkout and exposes the internal ports:
 | 3004 | `service-model-transformation` |
 | 3005 | `service-config` |
 | 3006 | `service-config-optimization` |
-| 3007 | `service-config-mdeo` |
+| 3007 | `service-model-csv` |
+| 3008 | `service-config-mdeo` |
+| — | `service-csv`, reachable only from inside the compose network |
 | 5432–5435 | PostgreSQL (backend, script, model-transformation, optimizer) |
 
 Three `optimizer-execution` nodes are started and wired as peers, so distributed search can be
@@ -66,6 +68,8 @@ without further configuration:
 | `/plugin/config` | `http://localhost:3004` |
 | `/plugin/config-optimization` | `http://localhost:3005` |
 | `/plugin/config-mdeo` | `http://localhost:3006` |
+| `/plugin/model-csv` | `http://localhost:3007` |
+| `/plugin/csv` | `http://localhost:3008` |
 | `/api` | `http://localhost:8080` |
 
 Set `PORT` accordingly when starting each service. Adding a new plugin means adding a proxy entry —

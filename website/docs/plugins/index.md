@@ -1,6 +1,6 @@
 # Plugins
 
-Everything MDEO Cloud can do with a file comes from a plugin. The platform ships with seven, and they
+Everything MDEO Cloud can do with a file comes from a plugin. The platform ships with nine, and they
 use exactly the contract described in [the developer guide](/develop/) — nothing about them is
 privileged.
 
@@ -19,6 +19,8 @@ lives.
 | [Config](/plugins/config) | `config` (`.config`) | — | The host language for configuration sections |
 | [Config Optimization](/plugins/config-optimization) | `config-optimization` (generated) | Config | The `problem` and `goal` sections |
 | [Config MDEO](/plugins/config-mdeo) | `config-mdeo` (generated) | Config | The `search`, `solver` and `runtime` sections |
+| [CSV](/plugins/csv) | `csv` (`.csv`) | — | Tabular data files |
+| [Model CSV](/plugins/model-csv) | `model-csv` (generated) | Model | Build a model from CSV files |
 
 ## How they fit together
 
@@ -26,6 +28,7 @@ lives.
 | --- | --- |
 | A file names the metamodel it is written against | `plan.m`, `assign.mt` and `objectives.fn` each start with `using "./tasks.mm"` |
 | A file imports declarations from another file | `optimize.config` has `import { unassignedEffort } from "./objectives.fn"` |
+| A file imports data from another file | `plan.m` has `import CSV { Task from "./tasks.csv" }` |
 | A plugin exports its AST types to other contribution plugins | Metamodel exports `Class` and `Property`; Script exports `Function` |
 | A plugin contributes sections to the config language | Config Optimization contributes `problem` and `goal`; Config MDEO contributes `search`, `solver` and `runtime` |
 | A contribution plugin depends on another one's computed data | Config MDEO needs the `problem` section of Config Optimization before it can resolve class names |
@@ -51,7 +54,8 @@ assets referenced from that manifest (`language.js`, `editor.js`, `styles.css`) 
 same service and imported by the workbench as ES modules.
 
 The bundled plugins are reachable at `/plugin/<name>` behind the workbench's reverse proxy, which is
-what the default `DEFAULT_PLUGIN_URLS` refers to.
+what the default `DEFAULT_PLUGIN_URLS` refers to. The two CSV plugins are the exception: only
+`infra/docker-compose-dev.yaml` starts and registers them.
 
 ## Writing your own
 

@@ -43,7 +43,8 @@ frame : Rectangle {
 ```
 
 An object is `name : Class { ... }`. The name is unique within the file and is what links refer to.
-Inside the braces, each line assigns a property declared by the class or one of its supertypes.
+Inside the braces, each line assigns a property declared by the class or one of its supertypes, and
+each property may be assigned at most once.
 
 Values may be:
 
@@ -78,6 +79,21 @@ exactly like the model it came from.
 ## Contribution plugins contributed
 
 None. The model plugin does not extend any other language.
+
+## Contributions the model language accepts
+
+The model language takes *import* contributions: a plugin can register a grammar for the content of
+an `import <Name> { … }` block, and answer a request for the objects and links that block stands for.
+The [Model CSV plugin](/plugins/model-csv) is the one bundled example, adding
+
+```mdeo-model
+import CSV {
+    Task from "./tasks.csv"
+}
+```
+
+so that the rows of a [CSV file](/plugins/csv) become objects of the named metamodel class. Imported
+objects are merged with the hand-written ones before the model is handed to the execution services.
 
 ## Server-side capabilities
 

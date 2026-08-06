@@ -1,7 +1,7 @@
 # The extension model
 
 MDEO Cloud has exactly one extension mechanism: the plugin. Languages, editors, validations, type
-systems, execution backends and even the syntax of existing languages all arrive through it. The seven
+systems, execution backends and even the syntax of existing languages all arrive through it. The nine
 bundled plugins are ordinary plugins — there is no privileged path they take that yours cannot.
 
 This section describes the contract. If you want to see it applied, every page links to the bundled

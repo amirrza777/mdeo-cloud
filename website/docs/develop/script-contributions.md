@@ -8,7 +8,7 @@ This is how you grow the standard library, or give a domain its own notation, wi
 script language itself.
 
 ::: info Not yet used by a bundled plugin
-None of the seven bundled plugins contributes to the script language today. The mechanism is
+None of the bundled plugins contributes to the script language today. The mechanism is
 implemented and resolved on every service start; this page documents the payload it expects.
 :::
 
