@@ -46,7 +46,7 @@ are picked up by `app/package.json` automatically.
         "@mdeo/language-todo": "^0.1.0",
         "@mdeo/plugin": "^0.1.0",
         "@mdeo/service-common": "^0.1.0",
-        "lucide": "^0.575.0"
+        "lucide": "^1.29.0"
     },
     "devDependencies": {
         "@types/node": "^25.3.1",

@@ -194,6 +194,11 @@ Add a `LanguageServiceConfig` for the language and list it in `ServiceConfig.lan
 `LanguagePlugin` to `ServicePluginDefinition.languagePlugins`. Both refer to the *same*
 `LanguagePlugin` object, so the manifest and the runtime configuration cannot drift apart.
 
+Set `documentationUrl` while you are there if the language has a page to point at. The workbench puts
+a question mark next to the editor title actions of every file of that language, which opens the page
+in a new tab; a language without the field simply gets no such button. The bundled languages build
+theirs from `DOCUMENTATION_BASE_URL`, exported by `@mdeo/plugin`.
+
 ## Generated languages
 
 A generated language is for files the platform produces:
@@ -208,7 +213,8 @@ const generatedModelLanguagePlugin: LanguagePlugin = {
     serverPlugin: { import: "generatedLanguage.js" },
     graphicalEditorPlugin: { import: "editor.js", stylesUrl: "styles.css", stylesCls: "editor-model" },
     textualEditorPlugin: undefined,
-    isGenerated: true
+    isGenerated: true,
+    documentationUrl: `${DOCUMENTATION_BASE_URL}/plugins/model`
 };
 ```
 

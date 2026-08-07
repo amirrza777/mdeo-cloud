@@ -31,7 +31,7 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { ZoomIn, ZoomOut, RotateCcw } from "lucide-vue-next";
+import { ZoomIn, ZoomOut, RotateCcw } from "@lucide/vue";
 import { newPlot, purge, relayout, type Data, type Layout, type PlotlyHTMLElement } from "plotly.js-dist";
 import { useColorMode } from "@vueuse/core";
 

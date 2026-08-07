@@ -143,7 +143,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
-import { PlusCircle, Trash2, RefreshCw, Pin } from "lucide-vue-next";
+import { PlusCircle, Trash2, RefreshCw, Pin } from "@lucide/vue";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";

@@ -8,7 +8,7 @@ never leaving a high-priority task unassigned.
 Every file below lives in `website/samples/task-allocation` in the repository and is parsed and
 validated on every documentation build, so you can copy them verbatim.
 
-Create a project with all seven default plugins enabled and follow along.
+Create a project with all default plugins enabled and follow along.
 
 ## 1. Describe the domain
 

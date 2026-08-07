@@ -35,7 +35,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card } from "@/components/ui/card";
 import { SidebarMenu, SidebarMenuItem, SidebarInput } from "@/components/ui/sidebar";
 import SidebarMenuButtonChild from "@/components/ui/sidebar/SidebarMenuButtonChild.vue";
-import { Icon } from "lucide-vue-next";
+import { Icon } from "@lucide/vue";
 import type { Plugin } from "@mdeo/plugin";
 
 const props = withDefaults(

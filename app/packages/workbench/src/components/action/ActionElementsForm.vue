@@ -44,7 +44,7 @@
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { Plus, X } from "lucide-vue-next";
+import { Plus, X } from "@lucide/vue";
 import type { ActionSchemaElementsForm, ActionValidationError } from "@mdeo/language-common";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";

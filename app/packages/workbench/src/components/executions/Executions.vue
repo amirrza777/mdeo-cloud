@@ -87,7 +87,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { workbenchStateKey } from "@/components/workbench/util";
 import ExecutionItem from "./ExecutionItem.vue";
-import { Trash2 } from "lucide-vue-next";
+import { Trash2 } from "@lucide/vue";
 import type { ExecutionWithLoadedTree } from "@/data/workbenchState";
 import type { FileSystemNode } from "@/data/filesystem/file";
 import { findFileInTree } from "@/data/filesystem/util";

@@ -52,7 +52,7 @@
 </template>
 <script setup lang="ts">
 import { inject, ref } from "vue";
-import { Files, Sun, Moon, Search, Settings, UserRound, Play } from "lucide-vue-next";
+import { Files, Sun, Moon, Search, Settings, UserRound, Play } from "@lucide/vue";
 import { useColorMode } from "@vueuse/core";
 import Icon from "../Icon.vue";
 import SidebarRailButton from "./SidebarRailButton.vue";

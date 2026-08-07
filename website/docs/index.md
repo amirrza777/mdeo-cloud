@@ -23,7 +23,7 @@ features:
   - title: A workbench, not an IDE plugin
     details: Metamodels, models, transformations, scripts and optimisation configurations are edited in the browser, with full language support and graphical editors, without installing anything.
   - title: Everything is a plugin
-    details: A plugin is an HTTP service that serves a manifest. It contributes languages, editors and extensions to other languages. The seven bundled plugins use exactly the same contract you would.
+    details: A plugin is an HTTP service that serves a manifest. It contributes languages, editors and extensions to other languages. The nine bundled plugins use exactly the same contract you would.
   - title: Optimisation that scales out
     details: Search runs on dedicated execution nodes, so an optimisation can use many threads across many machines while the workbench stays responsive.
 ---

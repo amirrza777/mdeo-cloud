@@ -60,6 +60,11 @@ rectangle: Rectangle {
 }
 ```
 
+A property may be assigned at most once per object, since a second `=` on the same property would
+silently overwrite the first. Comparisons are not restricted: the same property may be constrained
+several times — `width > 10` together with `width < 100` — and a property that is compared may still
+be assigned in the same object.
+
 ::: tip Names are file-global
 Object names must be unique across the whole `.mt` file, not just within one pattern. An object
 matched in an outer scope is referred to by name — `rectangle { visible = true }` — rather than

@@ -10,7 +10,7 @@
     </div>
 </template>
 <script setup lang="ts">
-import { Sun, Moon } from "lucide-vue-next";
+import { Sun, Moon } from "@lucide/vue";
 import { useColorMode } from "@vueuse/core";
 import SidebarRailButton from "./SidebarRailButton.vue";
 import Icon from "../Icon.vue";

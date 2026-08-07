@@ -16,7 +16,7 @@ Registered plugins can be marked **default**. Default plugins are added automati
 created project.
 
 At startup the backend also registers the plugins listed in the `DEFAULT_PLUGIN_URLS` environment
-variable, which is how the bundled deployments come up with the seven standard plugins already
+variable, which is how the bundled deployments come up with the standard plugins already
 available.
 
 ::: warning Refresh after an upgrade

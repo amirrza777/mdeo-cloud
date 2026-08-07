@@ -22,7 +22,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { Eye, EyeOff } from "lucide-vue-next";
+import { Eye, EyeOff } from "@lucide/vue";
 import { InputGroup, InputGroupInput, InputGroupButton } from "@/components/ui/input-group";
 
 const props = defineProps({
