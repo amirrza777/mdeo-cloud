@@ -12,6 +12,9 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.utils.io.jvm.javaio.*
 import org.eclipse.jgit.lib.Constants
+import org.eclipse.jgit.transport.PacketLineOut
+import org.eclipse.jgit.transport.ReceiveCommand
+import org.eclipse.jgit.transport.ReceivePack
 import org.eclipse.jgit.transport.RefAdvertiser
 import org.eclipse.jgit.transport.UploadPack
 import java.io.ByteArrayOutputStream
@@ -44,33 +47,41 @@ fun Route.gitRoutes(
          */
         get("/info/refs") {
             val service = call.request.queryParameters["service"]
-            if (service != "git-upload-pack") {
-                // Push is not served yet. Saying so plainly is better than a
-                // protocol error the client would report as a broken remote.
-                call.respond(HttpStatusCode.Forbidden, "Only git-upload-pack is supported")
+            if (service != "git-upload-pack" && service != "git-receive-pack") {
+                call.respond(HttpStatusCode.Forbidden, "Unsupported service")
                 return@get
             }
 
-            val projectId = call.authorizeGitRead(projectService, userService) ?: return@get
+            // Advertising for a push already reveals the caller intends to
+            // write, so it is gated on write permission rather than read.
+            val permission =
+                if (service == "git-receive-pack") ProjectPermission.WRITE else ProjectPermission.READ
+            val projectId = call.authorizeGit(projectService, userService, permission) ?: return@get
 
             val repository = gitRepositoryService.openRepository(projectId)
             repository.use {
                 val body = ByteArrayOutputStream()
                 // The advertisement opens with a packet naming the service, then
                 // a flush packet, before the refs themselves.
-                writePacket(body, "# service=git-upload-pack\n")
+                writePacket(body, "# service=$service\n")
                 body.write(FLUSH_PACKET)
 
-                val uploadPack = UploadPack(repository)
-                uploadPack.setBiDirectionalPipe(false)
-                val advertiser = RefAdvertiser.PacketLineOutRefAdvertiser(
-                    org.eclipse.jgit.transport.PacketLineOut(body)
-                )
-                uploadPack.sendAdvertisedRefs(advertiser)
+                val advertiser = RefAdvertiser.PacketLineOutRefAdvertiser(PacketLineOut(body))
+                if (service == "git-upload-pack") {
+                    UploadPack(repository).apply {
+                        setBiDirectionalPipe(false)
+                        sendAdvertisedRefs(advertiser)
+                    }
+                } else {
+                    ReceivePack(repository).apply {
+                        setBiDirectionalPipe(false)
+                        sendAdvertisedRefs(advertiser)
+                    }
+                }
 
                 call.respondBytes(
                     body.toByteArray(),
-                    ContentType.parse("application/x-git-upload-pack-advertisement")
+                    ContentType.parse("application/x-$service-advertisement")
                 )
             }
         }
@@ -79,7 +90,8 @@ fun Route.gitRoutes(
          * The negotiation and pack transfer itself.
          */
         post("/git-upload-pack") {
-            val projectId = call.authorizeGitRead(projectService, userService) ?: return@post
+            val projectId =
+                call.authorizeGit(projectService, userService, ProjectPermission.READ) ?: return@post
 
             val repository = gitRepositoryService.openRepository(projectId)
             val requestBody = call.receiveStream().readBytes()
@@ -91,6 +103,63 @@ fun Route.gitRoutes(
                     val uploadPack = UploadPack(repository)
                     uploadPack.setBiDirectionalPipe(false)
                     uploadPack.upload(requestBody.inputStream(), this, null)
+                }
+            }
+        }
+
+        /**
+         * Receiving a push.
+         */
+        post("/git-receive-pack") {
+            val projectId =
+                call.authorizeGit(projectService, userService, ProjectPermission.WRITE) ?: return@post
+
+            val repository = gitRepositoryService.openRepository(projectId)
+            val requestBody = call.receiveStream().readBytes()
+
+            call.respondOutputStream(
+                ContentType.parse("application/x-git-receive-pack-result")
+            ) {
+                repository.use {
+                    val receivePack = ReceivePack(repository)
+                    receivePack.setBiDirectionalPipe(false)
+                    // A push that is not a fast forward is refused, and the user
+                    // merges locally with tools they already know. That is what
+                    // removes the need for any conflict resolution here.
+                    receivePack.isAllowNonFastForwards = false
+
+                    receivePack.setPreReceiveHook { _, commands ->
+                        for (command in commands) {
+                            if (command.refName != gitRepositoryService.branch) {
+                                command.setResult(
+                                    ReceiveCommand.Result.REJECTED_OTHER_REASON,
+                                    "only ${gitRepositoryService.branch} can be pushed, " +
+                                        "a project has one set of files rather than one per branch"
+                                )
+                                continue
+                            }
+                            if (command.type == ReceiveCommand.Type.DELETE) {
+                                command.setResult(
+                                    ReceiveCommand.Result.REJECTED_OTHER_REASON,
+                                    "the project branch cannot be deleted"
+                                )
+                                continue
+                            }
+                            // Applied before the ref moves, so a push that cannot
+                            // be written into the project is refused outright
+                            // rather than leaving the branch ahead of the files.
+                            val failure = gitRepositoryService.applyCommitToProject(
+                                repository,
+                                projectId,
+                                command.newId
+                            )
+                            if (failure != null) {
+                                command.setResult(ReceiveCommand.Result.REJECTED_OTHER_REASON, failure)
+                            }
+                        }
+                    }
+
+                    receivePack.receive(requestBody.inputStream(), this, null)
                 }
             }
         }
@@ -125,12 +194,14 @@ private fun writePacket(out: ByteArrayOutputStream, line: String) {
  *
  * @param projectService Used to check project permissions
  * @param userService Used to verify the supplied credentials
+ * @param permission The permission the caller needs on the project
  * @return The project id when access is allowed, or null when a response has
  *   already been sent
  */
-private suspend fun ApplicationCall.authorizeGitRead(
+private suspend fun ApplicationCall.authorizeGit(
     projectService: ProjectService,
-    userService: UserService
+    userService: UserService,
+    permission: ProjectPermission
 ): UUID? {
     val projectId = parameters["projectId"]
         ?.removeSuffix(".git")
@@ -165,7 +236,7 @@ private suspend fun ApplicationCall.authorizeGitRead(
             projectId,
             userId,
             user.roles.contains(UserRoles.ADMIN),
-            ProjectPermission.READ
+            permission
         )
     ) {
         // Deliberately the same answer as an unknown project, so this cannot be

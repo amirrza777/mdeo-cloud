@@ -61,7 +61,7 @@ fun Application.module(appConfig: AppConfig) {
         override val executionService: ExecutionService by lazy { ExecutionService(this) }
         override val webSocketNotificationService: WebSocketNotificationService by lazy { WebSocketNotificationService() }
         override val languagePluginRequestService: LanguagePluginRequestService by lazy { LanguagePluginRequestService(this) }
-        val gitRepositoryService: GitRepositoryService by lazy { GitRepositoryService() }
+        val gitRepositoryService: GitRepositoryService by lazy { GitRepositoryService(fileService) }
     }
     
     services.jwtService.init()

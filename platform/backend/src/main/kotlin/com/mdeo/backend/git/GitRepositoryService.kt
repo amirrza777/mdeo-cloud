@@ -1,6 +1,8 @@
 package com.mdeo.backend.git
 
 import com.mdeo.backend.database.FilesTable
+import com.mdeo.backend.service.FileService
+import com.mdeo.common.model.ApiResult
 import com.mdeo.common.model.FileType
 import org.eclipse.jgit.dircache.DirCache
 import org.eclipse.jgit.dircache.DirCacheEntry
@@ -11,6 +13,7 @@ import org.eclipse.jgit.lib.ObjectId
 import org.eclipse.jgit.lib.PersonIdent
 import org.eclipse.jgit.lib.RefUpdate
 import org.eclipse.jgit.revwalk.RevWalk
+import org.eclipse.jgit.treewalk.TreeWalk
 import org.jetbrains.exposed.v1.core.*
 import org.jetbrains.exposed.v1.jdbc.*
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -30,13 +33,17 @@ import kotlin.uuid.toKotlinUuid
  * history with a boundary nobody has to choose, and it means identical content
  * never produces a second commit.
  */
-class GitRepositoryService {
+class GitRepositoryService(
+    private val fileService: FileService
+) {
     private val logger = LoggerFactory.getLogger(GitRepositoryService::class.java)
 
     /**
-     * Branch a project's files are published on.
+     * Branch a project's files are published on, and the only one a push may
+     * target. Anything else would have no meaning: the project has one set of
+     * files, not one per branch.
      */
-    private val branch = "refs/heads/main"
+    val branch = "refs/heads/main"
 
     /**
      * Identity recorded on generated commits.
@@ -129,6 +136,68 @@ class GitRepositoryService {
             }
             return commitId
         }
+    }
+
+    /**
+     * Writes the contents of a pushed commit back into the project's files.
+     *
+     * Every path in the commit is written through the ordinary file service, so
+     * a push goes through exactly the same validation, version bump and project
+     * locking as an edit made in the workbench. Files the commit no longer
+     * contains are deleted, which is what makes a push replace the project
+     * rather than only add to it.
+     *
+     * Note that clients with the project open are not told about this. The
+     * platform has no file change broadcast at all today, so an edit made in
+     * one browser tab is equally invisible to another. That is a gap worth
+     * closing, but it is not specific to pushing.
+     *
+     * @param repository The project's repository, holding the pushed objects
+     * @param projectId The project to update
+     * @param commitId The commit whose contents should become the project
+     * @return null on success, or a message describing why the push cannot be
+     *   applied
+     */
+    fun applyCommitToProject(
+        repository: PostgresDfsRepository,
+        projectId: UUID,
+        commitId: ObjectId
+    ): String? {
+        val pushed = mutableMapOf<String, ByteArray>()
+        try {
+            RevWalk(repository).use { walk ->
+                val tree = walk.parseCommit(commitId).tree
+                TreeWalk(repository).use { treeWalk ->
+                    treeWalk.addTree(tree)
+                    treeWalk.isRecursive = true
+                    while (treeWalk.next()) {
+                        val loader = repository.open(treeWalk.getObjectId(0))
+                        pushed[treeWalk.pathString] = loader.bytes
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            logger.warn("Could not read pushed commit {} for project {}", commitId.name, projectId, e)
+            return "could not read the pushed commit"
+        }
+
+        val existing = readProjectFiles(projectId).map { it.first }.toSet()
+
+        for ((path, content) in pushed) {
+            val result = fileService.writeFile(projectId, path, content, create = true, overwrite = true)
+            if (result is ApiResult.Failure) {
+                return "could not write $path: ${result.error.message}"
+            }
+        }
+
+        for (path in existing - pushed.keys) {
+            val result = fileService.delete(projectId, path, recursive = false)
+            if (result is ApiResult.Failure) {
+                return "could not delete $path: ${result.error.message}"
+            }
+        }
+
+        return null
     }
 
     /**
