@@ -1,7 +1,16 @@
 {
     "name": "@mdeo/editor-model-transformation",
-    "version": "0.1.0",
+    "version": "0.2.11",
+    "license": "EPL-2.0",
     "type": "module",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/mde-optimiser/mdeo-cloud.git",
+        "directory": "app/packages/editor-model-transformation"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
@@ -15,15 +24,17 @@
     },
     "files": [
         "dist",
-        "src"
+        "src",
+        "LICENSE",
+        "LICENSES"
     ],
     "scripts": {
         "build:css": "npx @tailwindcss/cli -i ./src/styles/index.css -o ./dist/styles.css --minify",
         "watch:css": "npx @tailwindcss/cli -i ./src/styles/index.css -o ./dist/styles.css --watch"
     },
     "dependencies": {
-        "@mdeo/editor-shared": "^0.1.0",
-        "@mdeo/protocol-model-transformation": "^0.1.0"
+        "@mdeo/editor-shared": "^0.2.11",
+        "@mdeo/protocol-model-transformation": "^0.2.11"
     },
     "devDependencies": {
         "@eclipse-glsp/sprotty": "^2.6.0",
