@@ -16,7 +16,7 @@ import {
     AST_HANDLER_KEY
 } from "@mdeo/service-common";
 import type { ModelServices, GeneratedModelServices } from "@mdeo/language-model";
-import type { LanguagePlugin } from "@mdeo/plugin";
+import { DOCUMENTATION_BASE_URL, type LanguagePlugin } from "@mdeo/plugin";
 
 const modelLanguagePlugin: LanguagePlugin = {
     id: "model",
@@ -33,15 +33,13 @@ const modelLanguagePlugin: LanguagePlugin = {
     },
     textualEditorPlugin: {
         languageConfiguration: defaultLanguageConfiguration,
-        // Only the base language's own keyword. Keywords for contributed imports
-        // (e.g. `import CSV from`) come from each contribution plugin's
-        // additionalKeywords and are merged in by the workbench.
         monarchTokensProvider: serializeMonarchTokensProvider({
             ...defaultMonarchTokenProvider,
             keywords: ["using", "import", "CSV", "from"]
         })
     },
-    isGenerated: false
+    isGenerated: false,
+    documentationUrl: `${DOCUMENTATION_BASE_URL}/plugins/model`
 };
 
 /**
@@ -62,7 +60,8 @@ const generatedModelLanguagePlugin: LanguagePlugin = {
         stylesCls: "editor-model"
     },
     textualEditorPlugin: undefined,
-    isGenerated: true
+    isGenerated: true,
+    documentationUrl: `${DOCUMENTATION_BASE_URL}/plugins/model`
 };
 
 initializePluginContext();

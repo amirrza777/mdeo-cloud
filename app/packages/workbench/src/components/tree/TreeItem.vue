@@ -53,7 +53,7 @@
 </template>
 
 <script setup lang="ts" generic="T extends TreeItem">
-import { ChevronRight } from "lucide-vue-next";
+import { ChevronRight } from "@lucide/vue";
 import { cn } from "@/lib/utils";
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";

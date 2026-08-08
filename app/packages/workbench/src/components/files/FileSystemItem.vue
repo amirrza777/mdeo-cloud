@@ -73,7 +73,7 @@
                 <ContextMenuSeparator />
                 <ContextMenuItem @click="handleUploadClick">
                     <UploadIcon />
-                    <span>Upload CSV...</span>
+                    <span>Upload File...</span>
                 </ContextMenuItem>
                 <ContextMenuSeparator />
             </template>
@@ -97,7 +97,7 @@
         v-if="entry.type === FileType.Directory"
         ref="fileInputRef"
         type="file"
-        accept=".csv"
+        :accept="acceptedExtensions"
         multiple
         class="hidden"
         @change="handleFileInputChange"
@@ -122,7 +122,7 @@
 
 <script setup lang="ts">
 import { ref, inject, computed, useTemplateRef } from "vue";
-import { FolderIcon, EditIcon, Trash2Icon, DownloadIcon, UploadIcon, Icon } from "lucide-vue-next";
+import { FolderIcon, EditIcon, Trash2Icon, DownloadIcon, UploadIcon, Icon } from "@lucide/vue";
 import TreeItem from "@/components/tree/TreeItem.vue";
 import TreeItemInput from "../tree/TreeItemInput.vue";
 import FileSystemItemList from "./FileSystemItemList.vue";
@@ -145,6 +145,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { type FileSystemNode } from "@/data/filesystem/file";
 import type { NewItemState } from "./FileSystemItemList.vue";
+import { newFileSystemItemStateKey } from "./util";
 import type { ResolvedWorkbenchLanguagePlugin } from "@/data/plugin/plugin";
 import { workbenchStateKey } from "@/components/workbench/util";
 import { treeContextKey } from "../tree/util";
@@ -156,7 +157,7 @@ import { getFileExtension } from "@/data/filesystem/util";
 import { downloadFolderAsZip, downloadBlob } from "@/lib/zip";
 import plugin from "vue-sonner";
 import { fetchFileActions as fetchAvailableFileActions, triggerFileAction } from "@/components/action/fileActions";
-import { uploadCsvFiles } from "@/data/filesystem/uploadFiles";
+import { uploadFiles } from "@/data/filesystem/uploadFiles";
 
 const props = defineProps<{
     entry: FileSystemNode;
@@ -188,9 +189,36 @@ const emit = defineEmits<{
 
 const isRenaming = ref(false);
 const showDeleteDialog = ref(false);
-const newItem = ref<NewItemState>();
 const fileActions = ref<FileAction[]>([]);
 const fileInputRef = useTemplateRef("fileInputRef");
+
+const newFileSystemItemState = inject(newFileSystemItemStateKey)!;
+
+/**
+ * The new item to create, only set if this entry is the folder it is created in
+ */
+const newItem = computed<NewItemState | undefined>({
+    get() {
+        return isNewItemParent() ? newFileSystemItemState.value : undefined;
+    },
+    set(value) {
+        if (value == undefined) {
+            if (isNewItemParent()) {
+                newFileSystemItemState.value = undefined;
+            }
+        } else if (props.entry.type === FileType.Directory) {
+            newFileSystemItemState.value = { ...value, parent: props.entry };
+        }
+    }
+});
+
+/**
+ * Checks if the item currently being created is created in this entry
+ */
+function isNewItemParent(): boolean {
+    const state = newFileSystemItemState.value;
+    return state != undefined && state.parent.uri.toString() === props.entry.uri.toString();
+}
 
 const contextMenuActions = computed(() =>
     fileActions.value.filter((action) => action.displayLocations.includes(ActionDisplayLocation.CONTEXT_MENU))
@@ -200,7 +228,6 @@ const entryErrorCount = computed(() => {
     if (props.entry.type === FileType.File) {
         return diagnosticStore.fileDiagnostics.value.get(props.entry.uri.toString())?.errors ?? 0;
     }
-    // For folders, aggregate error counts from all descendant files
     const prefix = props.entry.uri.toString() + "/";
     let total = 0;
     for (const [uri, summary] of diagnosticStore.fileDiagnostics.value) {
@@ -290,6 +317,13 @@ function handleCreateFolder() {
     }
 }
 
+/**
+ * The file picker's `accept` attribute, listing every extension a registered
+ * language plugin handles, so the OS dialog only offers files that can
+ * actually be uploaded.
+ */
+const acceptedExtensions = computed(() => Array.from(languagePluginByExtension.value.keys()).join(","));
+
 function handleUploadClick() {
     fileInputRef.value?.click();
 }
@@ -300,7 +334,7 @@ async function handleFileInputChange(event: Event) {
     }
     const input = event.target as HTMLInputElement;
     if (input.files != undefined && input.files.length > 0) {
-        await uploadCsvFiles(input.files, props.entry.uri, monacoApi.fileService, tabs, activeTab);
+        await uploadFiles(input.files, props.entry.uri, monacoApi.fileService, tabs, activeTab, languagePluginByExtension);
     }
     input.value = "";
 }

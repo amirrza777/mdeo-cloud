@@ -86,7 +86,7 @@ import ScrollArea from "@/components/ui/scroll-area/ScrollArea.vue";
 import Tree from "@/components/tree/Tree.vue";
 import FileSelectTreeItemList from "./FileSelectTreeItemList.vue";
 import { PopoverRoot, PopoverTrigger, PopoverContent, PopoverPortal } from "reka-ui";
-import { ChevronDown } from "lucide-vue-next";
+import { ChevronDown } from "@lucide/vue";
 import { cn } from "@/lib/utils";
 import { getErrorsForPath } from "./actionFormUtils";
 import { workbenchStateKey } from "@/components/workbench/util";

@@ -81,7 +81,7 @@ import { FileCategory, parseUri } from "@mdeo/language-common";
 import { getFileExtension } from "@/data/filesystem/util";
 import GraphicalEditor from "./GraphicalEditor.vue";
 import PlotChart from "./PlotChart.vue";
-import { AlertCircle, ChevronDown, ExternalLink } from "lucide-vue-next";
+import { AlertCircle, ChevronDown, ExternalLink } from "@lucide/vue";
 import type { ResolvedWorkbenchLanguagePlugin } from "@/data/plugin/plugin";
 
 const props = defineProps<{

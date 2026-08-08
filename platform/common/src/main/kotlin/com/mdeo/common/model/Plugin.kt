@@ -80,6 +80,7 @@ data class BackendContributionPlugin(
  * @property graphicalEditorPlugin Optional graphical editor plugin configuration
  * @property textualEditorPlugin Optional textual editor plugin configuration
  * @property icon Icon data in Lucide IconNode format
+ * @property documentationUrl Optional URL of the documentation for this language
  */
 @Serializable
 data class BackendLanguagePlugin(
@@ -91,7 +92,8 @@ data class BackendLanguagePlugin(
     val graphicalEditorPlugin: LanguageGraphicalEditorPlugin? = null,
     val textualEditorPlugin: LanguageTextualEditorPlugin? = null,
     val icon: JsonArray,
-    val isGenerated: Boolean = false
+    val isGenerated: Boolean = false,
+    val documentationUrl: String? = null
 )
 
 /**

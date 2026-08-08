@@ -3,7 +3,7 @@
 </template>
 <script setup lang="ts">
 import { computed } from "vue";
-import { Clock, Loader2, CheckCircle2, XCircle, AlertCircle } from "lucide-vue-next";
+import { Clock, Loader2, CheckCircle2, XCircle, AlertCircle } from "@lucide/vue";
 import type { ExecutionState } from "@/data/execution/execution";
 
 const props = defineProps<{

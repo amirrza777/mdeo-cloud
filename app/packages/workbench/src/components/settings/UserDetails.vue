@@ -63,7 +63,7 @@
 
 <script setup lang="ts">
 import { ref, watch } from "vue";
-import { Folder } from "lucide-vue-next";
+import { Folder } from "@lucide/vue";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import type { User, BackendApi } from "@/data/api/backendApi";

@@ -48,7 +48,8 @@ data class ManifestLanguagePlugin(
     val graphicalEditorPlugin: ManifestGraphicalEditorPlugin? = null,
     val textualEditorPlugin: ManifestTextualEditorPlugin? = null,
     val icon: JsonArray,
-    val isGenerated: Boolean = false
+    val isGenerated: Boolean = false,
+    val documentationUrl: String? = null
 )
 
 @Serializable
@@ -333,6 +334,7 @@ class PluginService(services: InjectedServices) : BaseService(), InjectedService
                 it[textualEditorMonarchTokensProvider] = plugin.textualEditorPlugin?.monarchTokensProvider?.toString()
                 it[icon] = plugin.icon.toString()
                 it[isGenerated] = plugin.isGenerated
+                it[documentationUrl] = plugin.documentationUrl
                 it[createdAt] = now
                 it[updatedAt] = now
             }
@@ -770,7 +772,8 @@ class PluginService(services: InjectedServices) : BaseService(), InjectedService
                 )
             },
             icon = json.parseToJsonElement(row[LanguagePluginsTable.icon]).jsonArray,
-            isGenerated = row[LanguagePluginsTable.isGenerated]
+            isGenerated = row[LanguagePluginsTable.isGenerated],
+            documentationUrl = row[LanguagePluginsTable.documentationUrl]
         )
     }
 

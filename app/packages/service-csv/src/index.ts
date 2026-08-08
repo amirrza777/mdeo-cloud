@@ -15,7 +15,7 @@ import {
     serializeMonarchTokensProvider,
     type ExternalReferenceAdditionalServices
 } from "@mdeo/language-common";
-import type { LanguagePlugin } from "@mdeo/plugin";
+import { DOCUMENTATION_BASE_URL, type LanguagePlugin } from "@mdeo/plugin";
 
 const csvLanguagePlugin: LanguagePlugin = {
     id: "csv",
@@ -34,7 +34,8 @@ const csvLanguagePlugin: LanguagePlugin = {
             keywords: []
         })
     },
-    isGenerated: false
+    isGenerated: false,
+    documentationUrl: `${DOCUMENTATION_BASE_URL}/plugins/csv`
 };
 
 const csvServicePlugin: ServicePluginDefinition = {

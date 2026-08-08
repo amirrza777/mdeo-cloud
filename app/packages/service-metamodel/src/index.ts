@@ -16,7 +16,7 @@ import {
 } from "@mdeo/service-common";
 import { convertIcon } from "@mdeo/language-common";
 import type { MetamodelServices } from "@mdeo/language-metamodel";
-import type { LanguagePlugin } from "@mdeo/plugin";
+import { DOCUMENTATION_BASE_URL, type LanguagePlugin } from "@mdeo/plugin";
 
 /**
  * Language plugin definition for the metamodel language.
@@ -41,7 +41,8 @@ const metamodelLanguagePlugin: LanguagePlugin = {
             keywords: ["class", "extends", "abstract", "import", "from", "as", "enum"]
         })
     },
-    isGenerated: false
+    isGenerated: false,
+    documentationUrl: `${DOCUMENTATION_BASE_URL}/plugins/metamodel`
 };
 
 initializePluginContext();

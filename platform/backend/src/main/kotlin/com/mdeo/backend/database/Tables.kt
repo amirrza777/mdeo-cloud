@@ -143,6 +143,7 @@ object LanguagePluginsTable : Table("language_plugins") {
     val textualEditorMonarchTokensProvider = text("textual_editor_monarch_tokens_provider").nullable()
     val icon = text("icon")
     val isGenerated = bool("is_generated").default(false)
+    val documentationUrl = varchar("documentation_url", 2048).nullable()
     val createdAt = timestamp("created_at")
     val updatedAt = timestamp("updated_at")
 

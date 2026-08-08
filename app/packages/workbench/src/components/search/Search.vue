@@ -74,7 +74,7 @@ import {
     watch
 } from "vue";
 import { useDebounceFn, watchDebounced } from "@vueuse/core";
-import { CaseSensitive, WholeWord, Regex } from "lucide-vue-next";
+import { CaseSensitive, WholeWord, Regex } from "@lucide/vue";
 import { Input } from "../ui/input";
 import { Toggle } from "../ui/toggle";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";

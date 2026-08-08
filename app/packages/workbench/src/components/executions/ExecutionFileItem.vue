@@ -51,7 +51,7 @@
 
 <script setup lang="ts">
 import { computed, inject, ref } from "vue";
-import { FolderIcon, DownloadIcon, Icon } from "lucide-vue-next";
+import { FolderIcon, DownloadIcon, Icon } from "@lucide/vue";
 import TreeItem from "@/components/tree/TreeItem.vue";
 import FileTypeIcon from "@/components/FileTypeIcon.vue";
 import { ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem } from "@/components/ui/context-menu";
