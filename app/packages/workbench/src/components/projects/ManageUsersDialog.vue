@@ -163,7 +163,7 @@
 
 <script setup lang="ts">
 import { computed, inject, ref, watch } from "vue";
-import { Plus, Trash2, User as UserIcon } from "lucide-vue-next";
+import { Plus, Trash2, User as UserIcon } from "@lucide/vue";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";

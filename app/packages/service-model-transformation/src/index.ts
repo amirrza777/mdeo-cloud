@@ -16,7 +16,7 @@ import {
 } from "@mdeo/service-common";
 import type { ModelTransformationServices } from "@mdeo/language-model-transformation";
 import type { GeneratedModelTransformationServices } from "@mdeo/language-model-transformation";
-import type { LanguagePlugin } from "@mdeo/plugin";
+import { DOCUMENTATION_BASE_URL, type LanguagePlugin } from "@mdeo/plugin";
 
 const icon: ActionIconNode = [
     [
@@ -129,7 +129,8 @@ const modelTransformationLanguagePlugin: LanguagePlugin = {
         stylesUrl: "styles.css",
         stylesCls: "editor-model-transformation"
     },
-    isGenerated: false
+    isGenerated: false,
+    documentationUrl: `${DOCUMENTATION_BASE_URL}/plugins/model-transformation`
 };
 
 /**
@@ -150,7 +151,8 @@ const generatedModelTransformationLanguagePlugin: LanguagePlugin = {
         stylesCls: "editor-model-transformation"
     },
     textualEditorPlugin: undefined,
-    isGenerated: true
+    isGenerated: true,
+    documentationUrl: `${DOCUMENTATION_BASE_URL}/plugins/model-transformation`
 };
 
 /**

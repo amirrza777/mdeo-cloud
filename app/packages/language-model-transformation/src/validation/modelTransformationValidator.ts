@@ -19,6 +19,7 @@ import {
     type PatternObjectInstanceType,
     type PatternObjectInstanceReferenceType,
     type PatternObjectInstanceDeleteType,
+    type PatternPropertyAssignmentType,
     type PatternLinkType,
     type PatternType,
     type TransformationStatementType,
@@ -339,6 +340,8 @@ export class ModelTransformationValidator extends BaseModelValidator {
      * @param accept The validation acceptor
      */
     validateObjectInstance(obj: PatternObjectInstanceType, accept: ValidationAcceptor): void {
+        this.validateNoDuplicatePatternPropertyAssignments(obj.properties, accept);
+
         if (obj.class != undefined) {
             this.validateClassNotAbstract(obj, accept);
             this.validateRequiredPropertiesForCreate(obj, accept);
@@ -464,12 +467,33 @@ export class ModelTransformationValidator extends BaseModelValidator {
     }
 
     /**
+     * Validates that no property is assigned more than once within a pattern element.
+     *
+     * Only the assignment operator (`=`) is restricted: it writes the property, so a second write
+     * to the same property within one element is contradictory. Comparison operators
+     * (`==`, `!=`, `<`, `>`, `<=`, `>=`) only constrain matching and may therefore appear any
+     * number of times for the same property, alongside an assignment to it.
+     *
+     * @param properties The property assignments of a single pattern element
+     * @param accept The validation acceptor
+     */
+    private validateNoDuplicatePatternPropertyAssignments(
+        properties: PatternPropertyAssignmentType[] | undefined,
+        accept: ValidationAcceptor
+    ): void {
+        const assignments = (properties ?? []).filter((property) => property.operator === "=");
+        this.validateNoDuplicatePropertyAssignments(assignments, accept);
+    }
+
+    /**
      * Validates a pattern object instance reference.
      *
      * @param ref The pattern object instance reference to validate
      * @param accept The validation acceptor
      */
     validateObjectInstanceReference(ref: PatternObjectInstanceReferenceType, accept: ValidationAcceptor): void {
+        this.validateNoDuplicatePatternPropertyAssignments(ref.properties, accept);
+
         const instance = ref.instance?.ref;
         if (!instance) {
             return;

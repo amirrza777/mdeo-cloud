@@ -63,7 +63,7 @@
 </template>
 <script setup lang="ts">
 import { ref, computed, inject, watch } from "vue";
-import { Plus, Trash2, Check } from "lucide-vue-next";
+import { Plus, Trash2, Check } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {

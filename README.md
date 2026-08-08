@@ -4,6 +4,15 @@ Welcome to **MDEO Cloud**, a scalable, cloud-native platform for Model-Driven En
 
 > **Note:** This project forks and incorporates parts of the original [MDEOptimiser](https://github.com/mde-optimiser/mde_optimiser). It builds upon its foundation to deliver a robust, distributed, and web-based execution platform for model optimizations and transformations.
 
+## 📚 Documentation
+
+Full documentation — an introduction to the platform, a reference page for every bundled plugin, and a
+developer guide for writing your own — is published at
+**<https://mde-optimiser.github.io/mdeo-cloud/>**.
+
+The source lives in [`website/`](website/); see [`website/README.md`](website/README.md) for how to
+run it locally.
+
 ## 🏗️ Architecture Overview
 
 MDEO Cloud relies on a modern, distributed architecture composed of several key components:

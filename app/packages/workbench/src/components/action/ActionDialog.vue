@@ -55,7 +55,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch, inject } from "vue";
-import { ChevronLeft, ChevronRight, Check, Loader2 } from "lucide-vue-next";
+import { ChevronLeft, ChevronRight, Check, Loader2 } from "@lucide/vue";
 import {
     Dialog,
     DialogContent,

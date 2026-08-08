@@ -122,7 +122,7 @@
 
 <script setup lang="ts">
 import { computed, inject, watch } from "vue";
-import { FileText, Loader2, XCircle, Trash2, Download, FileCode, Clock, Play, Timer } from "lucide-vue-next";
+import { FileText, Loader2, XCircle, Trash2, Download, FileCode, Clock, Play, Timer } from "@lucide/vue";
 import { useTimeAgo } from "@vueuse/core";
 import TreeItem from "@/components/tree/TreeItem.vue";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";

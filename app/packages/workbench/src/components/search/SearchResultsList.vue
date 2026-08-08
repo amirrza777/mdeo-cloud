@@ -60,7 +60,7 @@
 import { computed, inject, ref, useTemplateRef, watch, type HTMLAttributes } from "vue";
 import { ScrollAreaCorner, ScrollAreaRoot, ScrollAreaViewport } from "reka-ui";
 import { useResizeObserver } from "@vueuse/core";
-import { ChevronRight } from "lucide-vue-next";
+import { ChevronRight } from "@lucide/vue";
 import { cn } from "@/lib/utils";
 import ScrollBar from "@/components/ui/scroll-area/ScrollBar.vue";
 import FileTypeIcon from "@/components/FileTypeIcon.vue";

@@ -15,7 +15,7 @@ import {
 } from "@mdeo/service-common";
 import { convertIcon } from "@mdeo/language-common";
 import type { ConfigAdditionalServices } from "@mdeo/language-config";
-import type { LanguagePlugin } from "@mdeo/plugin";
+import { DOCUMENTATION_BASE_URL, type LanguagePlugin } from "@mdeo/plugin";
 import { DefaultScopeProvider } from "langium";
 
 const icon: ActionIconNode = convertIcon(Settings);
@@ -39,7 +39,8 @@ const configLanguagePlugin: LanguagePlugin = {
             keywords: []
         })
     },
-    isGenerated: false
+    isGenerated: false,
+    documentationUrl: `${DOCUMENTATION_BASE_URL}/plugins/config`
 };
 
 /**

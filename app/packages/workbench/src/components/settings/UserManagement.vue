@@ -62,7 +62,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from "vue";
-import { User } from "lucide-vue-next";
+import { User } from "@lucide/vue";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Card } from "@/components/ui/card";
 import { SidebarMenu, SidebarMenuItem, SidebarInput } from "@/components/ui/sidebar";

@@ -1,0 +1,27 @@
+using "./shapes.mm"
+
+// Objective and constraint functions take no parameters and return a number.
+fun shapeCount(): int {
+    return Shape.all().size()
+}
+
+fun invisibleShapes(): int {
+    var count = 0
+    for (shape in Shape.all()) {
+        if (!shape.visible) {
+            count = count + 1
+        }
+    }
+    return count
+}
+
+// A constraint returns 0 when it is satisfied; any larger value is the degree of violation.
+fun emptyLayers(): int {
+    var violations = 0
+    for (layer in Layer.all()) {
+        if (layer.shapes.size() == 0) {
+            violations = violations + 1
+        }
+    }
+    return violations
+}

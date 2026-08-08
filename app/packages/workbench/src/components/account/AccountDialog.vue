@@ -110,7 +110,7 @@
 
 <script setup lang="ts">
 import { computed, inject, ref } from "vue";
-import { UserRound, LogOut, ChevronDown, ChevronUp } from "lucide-vue-next";
+import { UserRound, LogOut, ChevronDown, ChevronUp } from "@lucide/vue";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import PasswordField from "@/components/auth/PasswordField.vue";

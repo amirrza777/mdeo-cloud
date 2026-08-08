@@ -1,0 +1,84 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "website/**"
+      - "app/packages/**"
+      - ".github/workflows/docs.yml"
+  pull_request:
+    paths:
+      - "website/**"
+      - "app/packages/**"
+      - ".github/workflows/docs.yml"
+  workflow_dispatch:
+
+# Allow the workflow to publish to GitHub Pages.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deployments at once, but let a queued one finish rather than
+# cancelling it, so main and the live site cannot drift apart.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            app/package-lock.json
+            website/package-lock.json
+
+      # The sample validator loads the built language packages, so the app
+      # packages have to be compiled before the docs can be built.
+      - name: Install app dependencies
+        working-directory: app
+        run: npm ci
+
+      - name: Build language packages
+        working-directory: app
+        run: npm run build:packages
+
+      - name: Install website dependencies
+        working-directory: website
+        run: npm ci
+
+      - name: Validate documentation samples
+        working-directory: website
+        run: npm run validate
+
+      - name: Build site
+        working-directory: website
+        run: npx vitepress build docs
+
+      - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
+
+      - uses: actions/upload-pages-artifact@v4
+        if: github.event_name != 'pull_request'
+        with:
+          path: website/docs/.vitepress/dist
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -137,10 +137,12 @@ export class ModelValidator extends BaseModelValidator {
      * Validates an object instance, including:
      * - Class must not be abstract
      * - All required properties must be defined
+     * - No property is assigned more than once
      */
     validateObjectInstance(obj: ObjectInstanceType, accept: ValidationAcceptor): void {
         this.validateClassNotAbstract(obj, accept);
         this.validateRequiredProperties(obj, accept);
+        this.validateNoDuplicatePropertyAssignments(obj.properties ?? [], accept);
     }
 
     /**

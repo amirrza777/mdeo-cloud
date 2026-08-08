@@ -78,7 +78,7 @@ import {
 } from "@/components/ui/combobox";
 import ComboboxList from "@/components/ui/combobox/ComboboxList.vue";
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group";
-import { ChevronDown, Check } from "lucide-vue-next";
+import { ChevronDown, Check } from "@lucide/vue";
 import { getErrorsForPath } from "./actionFormUtils";
 
 const props = defineProps<{
