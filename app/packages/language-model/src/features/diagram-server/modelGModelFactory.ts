@@ -497,6 +497,22 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
      * by its wrapper type name rather than importing its types directly (which would
      * create a circular package dependency, since language-model-csv depends on
      * language-model for the contribution plugin contract).
+     *
+     * A real generic extension point (a contribution plugin owning its own node
+     * rendering, not language-model reaching into its import) is tracked as #35.
+     * It is not a small follow-up: the workbench, where this diagram actually
+     * renders, loads plugins as a merged grammar only, with no mechanism to call
+     * into another plugin's code at runtime, unlike the backend's plugin-RPC path
+     * (which this session confirmed does not build a live GLSP model today).
+     * Building that generic point means giving plugins a way to contribute their
+     * own rendering the same way `language.js` is already served and dynamically
+     * imported per plugin, which is real, separate work.
+     *
+     * The CSV file itself is read through `LangiumDocuments` rather than the raw
+     * `FileSystemProvider`, so this benefits from Langium's own document caching
+     * and works no matter which `FileSystemProvider` is bound, the same way the
+     * metamodel document is read elsewhere in this codebase rather than opened
+     * as a plain file.
      */
     private async createCsvNodes(graph: GGraphType, model: PartialModel): Promise<void> {
         interface CsvClassImportShape {
@@ -523,7 +539,10 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
             if (classRef == undefined) continue;
             try {
                 const uri = resolveRelativePath(doc, entry.file ?? "");
-                const csvContent = await this.modelState.languageServices.shared.workspace.FileSystemProvider.readFile(uri);
+                const csvDocument = await this.modelState.languageServices.shared.workspace.LangiumDocuments.getOrCreateDocument(
+                    uri
+                );
+                const csvContent = csvDocument.textDocument.getText();
                 const rows = parseCsv(csvContent);
                 if (rows.length < 2) continue;
                 const classChain = resolveClassChain(classRef, this.reflection);
