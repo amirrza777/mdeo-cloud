@@ -33,9 +33,11 @@ const modelLanguagePlugin: LanguagePlugin = {
     },
     textualEditorPlugin: {
         languageConfiguration: defaultLanguageConfiguration,
+        // Contribution plugins (e.g. CSV) add their own import keywords via
+        // additionalKeywords and are merged in by the workbench.
         monarchTokensProvider: serializeMonarchTokensProvider({
             ...defaultMonarchTokenProvider,
-            keywords: ["using", "import", "CSV", "from"]
+            keywords: ["using"]
         })
     },
     isGenerated: false,
