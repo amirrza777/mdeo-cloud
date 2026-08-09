@@ -89,7 +89,7 @@
                         <span>Download</span>
                     </ContextMenuItem>
                     <ContextMenuItem @click="handleUploadClick">
-                        <UploadIcon />
+                        <UploadIcon class="size-4 mr-2" />
                         <span>Upload File...</span>
                     </ContextMenuItem>
                 </ContextMenuContent>
