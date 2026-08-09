@@ -3,7 +3,7 @@ import { Uri } from "vscode";
 import type { Ref } from "vue";
 import type { MonacoApi } from "@/lib/monacoPlugin";
 import type { EditorTab } from "@/data/tab/editorTab";
-import { showError, showSuccess } from "@/lib/notifications";
+import { showError, showSuccess, showWarning } from "@/lib/notifications";
 import { getFileExtension } from "@/data/filesystem/util";
 
 /**
@@ -37,7 +37,7 @@ export async function uploadFiles(
     const rejectedCount = fileArray.length - supportedFiles.length;
 
     if (rejectedCount > 0) {
-        showError(rejectedCount === 1 ? "1 file was skipped" : `${rejectedCount} files were skipped`, {
+        showWarning(rejectedCount === 1 ? "1 file was skipped" : `${rejectedCount} files were skipped`, {
             description: "Only files of a supported type can be uploaded here."
         });
     }
@@ -63,7 +63,13 @@ export async function uploadFiles(
         return;
     }
 
-    showSuccess(uploaded.length === 1 ? `Uploaded ${uploaded[0]}` : `Uploaded ${uploaded.length} files`);
+    if (uploaded.length < fileArray.length) {
+        showSuccess(`Uploaded ${uploaded.length} of ${fileArray.length} files`);
+    } else if (uploaded.length === 1) {
+        showSuccess(`Uploaded ${uploaded[0]}`);
+    } else {
+        showSuccess(`Uploaded ${uploaded.length} files`);
+    }
 
     const existingTab = tabs.value.find((tab) => tab.fileUri.toString() === lastCreatedUri!.toString());
     if (existingTab) {
