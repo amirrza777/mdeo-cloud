@@ -5,22 +5,22 @@ import type { MonacoApi } from "@/lib/monacoPlugin";
 import type { EditorTab } from "@/data/tab/editorTab";
 import { showError, showSuccess } from "@/lib/notifications";
 import { getFileExtension } from "@/data/filesystem/util";
-import type { ResolvedWorkbenchLanguagePlugin } from "@/data/plugin/plugin";
 
 /**
  * Uploads dropped or picked files into a project folder, opening the last
  * successfully created file in a new tab.
  *
- * A file is only accepted if its extension belongs to a registered language
- * plugin, the same rule that decides what a user can create from the "New
- * File" menu.
+ * A file is only accepted if its extension (compared case-insensitively) is
+ * in {@link uploadableExtensions}, which callers build from the same
+ * non-generated plugins the "New File" menu offers, so upload never accepts
+ * a file type a user could not otherwise create by hand.
  *
  * @param files The files to upload
  * @param targetFolderUri The folder to create the files in
  * @param fileService Monaco's file service, used to create the files
  * @param tabs The current editor tabs
  * @param activeTab The currently active editor tab
- * @param languagePluginByExtension Registered language plugins, keyed by file extension
+ * @param uploadableExtensions Lowercased extensions (including the leading dot) that may be uploaded
  */
 export async function uploadFiles(
     files: FileList | File[],
@@ -28,10 +28,12 @@ export async function uploadFiles(
     fileService: MonacoApi["fileService"],
     tabs: Ref<EditorTab[]>,
     activeTab: Ref<EditorTab | undefined>,
-    languagePluginByExtension: Ref<Map<string, ResolvedWorkbenchLanguagePlugin>>
+    uploadableExtensions: Ref<Set<string>>
 ): Promise<void> {
     const fileArray = Array.from(files);
-    const supportedFiles = fileArray.filter((file) => languagePluginByExtension.value.has(getFileExtension(file.name)));
+    const supportedFiles = fileArray.filter((file) =>
+        uploadableExtensions.value.has(getFileExtension(file.name).toLowerCase())
+    );
     const rejectedCount = fileArray.length - supportedFiles.length;
 
     if (rejectedCount > 0) {

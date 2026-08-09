@@ -318,11 +318,24 @@ function handleCreateFolder() {
 }
 
 /**
- * The file picker's `accept` attribute, listing every extension a registered
- * language plugin handles, so the OS dialog only offers files that can
- * actually be uploaded.
+ * Extensions that may be uploaded: every non-generated language plugin's, the
+ * same set "Create New X" offers. Generated types (e.g. `.m_gen`) are derived
+ * output, not something a user hand-authors, so they are excluded here too.
  */
-const acceptedExtensions = computed(() => Array.from(languagePluginByExtension.value.keys()).join(","));
+const uploadableExtensions = computed(
+    () =>
+        new Set(
+            languagePlugins.value
+                .filter((plugin) => !plugin.isGenerated && plugin.extension)
+                .map((plugin) => plugin.extension!.toLowerCase())
+        )
+);
+
+/**
+ * The file picker's `accept` attribute, so the OS dialog only offers files
+ * that can actually be uploaded.
+ */
+const acceptedExtensions = computed(() => Array.from(uploadableExtensions.value).join(","));
 
 function handleUploadClick() {
     fileInputRef.value?.click();
@@ -334,7 +347,7 @@ async function handleFileInputChange(event: Event) {
     }
     const input = event.target as HTMLInputElement;
     if (input.files != undefined && input.files.length > 0) {
-        await uploadFiles(input.files, props.entry.uri, monacoApi.fileService, tabs, activeTab, languagePluginByExtension);
+        await uploadFiles(input.files, props.entry.uri, monacoApi.fileService, tabs, activeTab, uploadableExtensions);
     }
     input.value = "";
 }

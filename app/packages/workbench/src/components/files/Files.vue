@@ -144,8 +144,7 @@ import { downloadFolderAsZip } from "@/lib/zip";
 import { uploadFiles } from "@/data/filesystem/uploadFiles";
 
 const workbenchState = inject(workbenchStateKey)!;
-const { fileTree: rootFolder, activeTab, monacoApi, languagePlugins, languagePluginByExtension, tabs } =
-    workbenchState;
+const { fileTree: rootFolder, activeTab, monacoApi, languagePlugins, tabs } = workbenchState;
 
 const activeEntry = ref<FileSystemNode>();
 const expandedItems = ref<Set<FileSystemNode>>(new Set());
@@ -399,11 +398,24 @@ async function handleDownloadProject() {
 }
 
 /**
- * The file picker's `accept` attribute, listing every extension a registered
- * language plugin handles, so the OS dialog only offers files that can
- * actually be uploaded.
+ * Extensions that may be uploaded: every non-generated language plugin's, the
+ * same set "Create New X" offers. Generated types (e.g. `.m_gen`) are derived
+ * output, not something a user hand-authors, so they are excluded here too.
  */
-const acceptedExtensions = computed(() => Array.from(languagePluginByExtension.value.keys()).join(","));
+const uploadableExtensions = computed(
+    () =>
+        new Set(
+            languagePlugins.value
+                .filter((plugin) => !plugin.isGenerated && plugin.extension)
+                .map((plugin) => plugin.extension!.toLowerCase())
+        )
+);
+
+/**
+ * The file picker's `accept` attribute, so the OS dialog only offers files
+ * that can actually be uploaded.
+ */
+const acceptedExtensions = computed(() => Array.from(uploadableExtensions.value).join(","));
 
 function handleUploadClick() {
     fileInputRef.value?.click();
@@ -412,7 +424,7 @@ function handleUploadClick() {
 async function handleFileInputChange(event: Event) {
     const input = event.target as HTMLInputElement;
     if (input.files != undefined && input.files.length > 0) {
-        await uploadFiles(input.files, rootFolder.uri, monacoApi.fileService, tabs, activeTab, languagePluginByExtension);
+        await uploadFiles(input.files, rootFolder.uri, monacoApi.fileService, tabs, activeTab, uploadableExtensions);
     }
     input.value = "";
 }
@@ -421,7 +433,7 @@ async function handleFilesDropped(files: FileList, targetItem: TreeItem | undefi
     const targetNode = targetItem as FileSystemNode | undefined;
     const targetFolderUri =
         targetNode != undefined && targetNode.type === FileType.Directory ? targetNode.uri : rootFolder.uri;
-    await uploadFiles(files, targetFolderUri, monacoApi.fileService, tabs, activeTab, languagePluginByExtension);
+    await uploadFiles(files, targetFolderUri, monacoApi.fileService, tabs, activeTab, uploadableExtensions);
 }
 
 const dragAndDropCallbacks: DragAndDropCallbacks = {
