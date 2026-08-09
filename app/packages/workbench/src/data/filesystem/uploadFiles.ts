@@ -4,16 +4,34 @@ import type { Ref } from "vue";
 import type { MonacoApi } from "@/lib/monacoPlugin";
 import type { EditorTab } from "@/data/tab/editorTab";
 import { showError, showSuccess, showWarning } from "@/lib/notifications";
-import { getFileExtension } from "@/data/filesystem/util";
+import { getFileBaseName, getFileExtension } from "@/data/filesystem/util";
+import type { ResolvedWorkbenchLanguagePlugin } from "@/data/plugin/plugin";
+
+/**
+ * Extensions that may be uploaded: every non-generated language plugin's, the
+ * same set "Create New X" offers. Generated types (e.g. `.m_gen`) are derived
+ * output, not something a user hand-authors, so they are excluded too.
+ *
+ * Shared by every upload entry point (the context menu action and drag and
+ * drop, at the project root and per folder) so they can't drift apart.
+ *
+ * @param languagePlugins The workbench's registered language plugins
+ * @returns Lowercased extensions, including the leading dot, that may be uploaded
+ */
+export function getUploadableExtensions(languagePlugins: ResolvedWorkbenchLanguagePlugin[]): Set<string> {
+    return new Set(
+        languagePlugins
+            .filter((plugin) => !plugin.isGenerated && plugin.extension)
+            .map((plugin) => plugin.extension!.toLowerCase())
+    );
+}
 
 /**
  * Uploads dropped or picked files into a project folder, opening the last
  * successfully created file in a new tab.
  *
  * A file is only accepted if its extension (compared case-insensitively) is
- * in {@link uploadableExtensions}, which callers build from the same
- * non-generated plugins the "New File" menu offers, so upload never accepts
- * a file type a user could not otherwise create by hand.
+ * in {@link uploadableExtensions}, built by {@link getUploadableExtensions}.
  *
  * @param files The files to upload
  * @param targetFolderUri The folder to create the files in
@@ -46,14 +64,17 @@ export async function uploadFiles(
     const uploaded: string[] = [];
 
     for (const file of supportedFiles) {
-        const uri = Uri.joinPath(targetFolderUri, file.name);
+        // file.name comes from outside the application, so it is reduced to
+        // a base name before joining, rather than trusted as one path segment.
+        const name = getFileBaseName(file.name);
+        const uri = Uri.joinPath(targetFolderUri, name);
         try {
             const text = await file.text();
             await fileService.createFile(uri, VSBuffer.fromString(text));
             lastCreatedUri = uri;
-            uploaded.push(file.name);
+            uploaded.push(name);
         } catch (error) {
-            showError(`Failed to upload ${file.name}`, {
+            showError(`Failed to upload ${name}`, {
                 description: error instanceof Error ? error.message : undefined
             });
         }

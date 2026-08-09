@@ -157,7 +157,7 @@ import { getFileExtension } from "@/data/filesystem/util";
 import { downloadFolderAsZip, downloadBlob } from "@/lib/zip";
 import plugin from "vue-sonner";
 import { fetchFileActions as fetchAvailableFileActions, triggerFileAction } from "@/components/action/fileActions";
-import { uploadFiles } from "@/data/filesystem/uploadFiles";
+import { uploadFiles, getUploadableExtensions } from "@/data/filesystem/uploadFiles";
 
 const props = defineProps<{
     entry: FileSystemNode;
@@ -318,18 +318,9 @@ function handleCreateFolder() {
 }
 
 /**
- * Extensions that may be uploaded: every non-generated language plugin's, the
- * same set "Create New X" offers. Generated types (e.g. `.m_gen`) are derived
- * output, not something a user hand-authors, so they are excluded here too.
+ * Extensions that may be uploaded, see {@link getUploadableExtensions}.
  */
-const uploadableExtensions = computed(
-    () =>
-        new Set(
-            languagePlugins.value
-                .filter((plugin) => !plugin.isGenerated && plugin.extension)
-                .map((plugin) => plugin.extension!.toLowerCase())
-        )
-);
+const uploadableExtensions = computed(() => getUploadableExtensions(languagePlugins.value));
 
 /**
  * The file picker's `accept` attribute, so the OS dialog only offers files
