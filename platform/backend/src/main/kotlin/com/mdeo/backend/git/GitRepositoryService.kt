@@ -203,42 +203,54 @@ class GitRepositoryService(
         }
 
         val pushedPlugins = pushed.remove(pluginsPath)
-        val existing = readProjectFiles(projectId).map { it.first }.toSet()
 
-        for ((path, content) in pushed) {
-            val result = fileService.writeFile(projectId, path, content, create = true, overwrite = true)
-            if (result is ApiResult.Failure) {
-                return "could not write $path: ${result.error.message}"
+        // A single outer transaction, so a failure partway through (one path
+        // rejected, an unreadable plugins file) rolls every write and delete
+        // already made by this push back out rather than leaving the project
+        // part old, part new. FileService's own `transaction {}` calls join
+        // this one on the same thread instead of committing separately.
+        return try {
+            transaction {
+                val existing = readProjectFiles(projectId).map { it.first }.toSet()
+
+                for ((path, content) in pushed) {
+                    val result = fileService.writeFile(projectId, path, content, create = true, overwrite = true)
+                    if (result is ApiResult.Failure) {
+                        throw GitPushRejected("could not write $path: ${result.error.message}")
+                    }
+                }
+
+                for (path in existing - pushed.keys) {
+                    val result = fileService.delete(projectId, path, recursive = false)
+                    if (result is ApiResult.Failure) {
+                        throw GitPushRejected("could not delete $path: ${result.error.message}")
+                    }
+                }
+
+                // Absent rather than empty is treated as "not managed by this
+                // push", so a client that never touched .mdeo/plugins.json
+                // cannot silently clear every plugin a project has enabled.
+                if (pushedPlugins != null) {
+                    val urls = try {
+                        Json.parseToJsonElement(String(pushedPlugins)).jsonArray.map { it.jsonPrimitive.content }
+                    } catch (e: Exception) {
+                        throw GitPushRejected("could not read $pluginsPath: ${e.message}")
+                    }
+                    val unknown = pluginService.setProjectPlugins(projectId, urls)
+                    if (unknown.isNotEmpty()) {
+                        logger.info(
+                            "Project {} push referenced unregistered plugin urls, skipped: {}",
+                            projectId,
+                            unknown
+                        )
+                    }
+                }
+
+                null
             }
+        } catch (e: GitPushRejected) {
+            e.message
         }
-
-        for (path in existing - pushed.keys) {
-            val result = fileService.delete(projectId, path, recursive = false)
-            if (result is ApiResult.Failure) {
-                return "could not delete $path: ${result.error.message}"
-            }
-        }
-
-        // Absent rather than empty is treated as "not managed by this push", so
-        // a client that never touched .mdeo/plugins.json cannot silently clear
-        // every plugin a project has enabled.
-        if (pushedPlugins != null) {
-            val urls = try {
-                Json.parseToJsonElement(String(pushedPlugins)).jsonArray.map { it.jsonPrimitive.content }
-            } catch (e: Exception) {
-                return "could not read $pluginsPath: ${e.message}"
-            }
-            val unknown = pluginService.setProjectPlugins(projectId, urls)
-            if (unknown.isNotEmpty()) {
-                logger.info(
-                    "Project {} push referenced unregistered plugin urls, skipped: {}",
-                    projectId,
-                    unknown
-                )
-            }
-        }
-
-        return null
     }
 
     /**
@@ -353,3 +365,10 @@ class GitRepositoryService(
         }
     }
 }
+
+/**
+ * Thrown from inside [GitRepositoryService.applyCommitToProject]'s transaction
+ * to abort and roll back every write and delete already made by the push in
+ * progress, rather than letting a mid-push failure land partially.
+ */
+private class GitPushRejected(message: String) : Exception(message)
