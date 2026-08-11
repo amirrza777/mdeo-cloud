@@ -120,67 +120,76 @@ fun Route.gitRoutes(
             val projectId =
                 call.authorizeGit(projectService, userService, ProjectPermission.WRITE) ?: return@post
 
-            val repository = gitRepositoryService.openRepository(projectId)
-            val requestBody = call.receiveStream().readBytes()
+            // A fresh ReceivePack reads "the current ref" live at the start of
+            // handling its own request. Without serializing pushes to the same
+            // project, two racing pushes can both read that same live ref
+            // before either has moved it, both pass validation, and both run
+            // applyCommitToProject before JGit's own ref update decides which
+            // one actually wins, so the loser's files land even though its
+            // client is told it was rejected.
+            gitRepositoryService.withPushLock(projectId) {
+                val repository = gitRepositoryService.openRepository(projectId)
+                val requestBody = call.receiveStream().readBytes()
 
-            call.respondOutputStream(
-                ContentType.parse("application/x-git-receive-pack-result")
-            ) {
-                repository.use {
-                    val receivePack = ReceivePack(repository)
-                    receivePack.setBiDirectionalPipe(false)
-                    // Checked while unpacking, before any command runs, so an
-                    // oversized push is refused outright rather than applying
-                    // some of its files before running out of room.
-                    receivePack.setMaxPackSizeLimit(maxPushPackSizeBytes)
-                    // A push that is not a fast forward is refused, and the user
-                    // merges locally with tools they already know. That is what
-                    // removes the need for any conflict resolution here.
-                    receivePack.isAllowNonFastForwards = false
+                call.respondOutputStream(
+                    ContentType.parse("application/x-git-receive-pack-result")
+                ) {
+                    repository.use {
+                        val receivePack = ReceivePack(repository)
+                        receivePack.setBiDirectionalPipe(false)
+                        // Checked while unpacking, before any command runs, so an
+                        // oversized push is refused outright rather than applying
+                        // some of its files before running out of room.
+                        receivePack.setMaxPackSizeLimit(maxPushPackSizeBytes)
+                        // A push that is not a fast forward is refused, and the user
+                        // merges locally with tools they already know. That is what
+                        // removes the need for any conflict resolution here.
+                        receivePack.isAllowNonFastForwards = false
 
-                    receivePack.setPreReceiveHook { _, commands ->
-                        for (command in commands) {
-                            if (command.refName != gitRepositoryService.branch) {
-                                command.setResult(
-                                    ReceiveCommand.Result.REJECTED_OTHER_REASON,
-                                    "only ${gitRepositoryService.branch} can be pushed, " +
-                                        "a project has one set of files rather than one per branch"
+                        receivePack.setPreReceiveHook { _, commands ->
+                            for (command in commands) {
+                                if (command.refName != gitRepositoryService.branch) {
+                                    command.setResult(
+                                        ReceiveCommand.Result.REJECTED_OTHER_REASON,
+                                        "only ${gitRepositoryService.branch} can be pushed, " +
+                                            "a project has one set of files rather than one per branch"
+                                    )
+                                    continue
+                                }
+                                if (command.type == ReceiveCommand.Type.DELETE) {
+                                    command.setResult(
+                                        ReceiveCommand.Result.REJECTED_OTHER_REASON,
+                                        "the project branch cannot be deleted"
+                                    )
+                                    continue
+                                }
+                                // Applied before the ref moves, so a push that cannot
+                                // be written into the project is refused outright
+                                // rather than leaving the branch ahead of the files.
+                                val failure = gitRepositoryService.applyCommitToProject(
+                                    repository,
+                                    projectId,
+                                    command.newId
                                 )
-                                continue
-                            }
-                            if (command.type == ReceiveCommand.Type.DELETE) {
-                                command.setResult(
-                                    ReceiveCommand.Result.REJECTED_OTHER_REASON,
-                                    "the project branch cannot be deleted"
-                                )
-                                continue
-                            }
-                            // Applied before the ref moves, so a push that cannot
-                            // be written into the project is refused outright
-                            // rather than leaving the branch ahead of the files.
-                            val failure = gitRepositoryService.applyCommitToProject(
-                                repository,
-                                projectId,
-                                command.newId
-                            )
-                            if (failure != null) {
-                                command.setResult(ReceiveCommand.Result.REJECTED_OTHER_REASON, failure)
+                                if (failure != null) {
+                                    command.setResult(ReceiveCommand.Result.REJECTED_OTHER_REASON, failure)
+                                }
                             }
                         }
-                    }
 
-                    try {
-                        receivePack.receive(requestBody.inputStream(), this, null)
-                    } catch (e: UnpackException) {
-                        // JGit already wrote the rejection (for instance
-                        // exceeding the size limit above) into the response
-                        // as a normal git status report before throwing this,
-                        // so the client already saw a clean error. Without
-                        // this catch it would also reach the application's
-                        // generic handler and log as a 500, which reads as a
-                        // server crash rather than the expected rejection of
-                        // an oversized or malformed push that it is.
-                        logger.info("Rejected push for project {}: {}", projectId, e.message)
+                        try {
+                            receivePack.receive(requestBody.inputStream(), this, null)
+                        } catch (e: UnpackException) {
+                            // JGit already wrote the rejection (for instance
+                            // exceeding the size limit above) into the response
+                            // as a normal git status report before throwing this,
+                            // so the client already saw a clean error. Without
+                            // this catch it would also reach the application's
+                            // generic handler and log as a 500, which reads as a
+                            // server crash rather than the expected rejection of
+                            // an oversized or malformed push that it is.
+                            logger.info("Rejected push for project {}: {}", projectId, e.message)
+                        }
                     }
                 }
             }

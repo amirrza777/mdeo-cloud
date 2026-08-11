@@ -5,6 +5,8 @@ import com.mdeo.backend.service.FileService
 import com.mdeo.backend.service.PluginService
 import com.mdeo.common.model.ApiResult
 import com.mdeo.common.model.FileType
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonArray
@@ -27,6 +29,7 @@ import org.slf4j.LoggerFactory
 import java.time.Instant
 import java.util.Base64
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.uuid.toKotlinUuid
 
 /**
@@ -70,6 +73,35 @@ class GitRepositoryService(
      * misleading.
      */
     private val author = PersonIdent("MDEO Cloud", "mdeo-cloud@localhost")
+
+    /**
+     * One lock per project that has been pushed to, held for the duration of a
+     * push. Never removed: a project is pushed to rarely enough, and the
+     * process lives long enough, that this is not worth the complexity of
+     * eviction.
+     */
+    private val pushLocks = ConcurrentHashMap<UUID, Mutex>()
+
+    /**
+     * Serializes push handling for one project.
+     *
+     * A fresh `ReceivePack` reads the ref it treats as "current" itself, live,
+     * at the start of handling its own request rather than from an earlier
+     * advertisement. Without this lock, two pushes racing on the same stale
+     * head can both read that same live ref before either has moved it, so
+     * both pass validation and both run [applyCommitToProject] from the
+     * pre-receive hook, which happens before JGit's own ref update decides
+     * which one actually wins. The one that loses that ref update is reported
+     * to its client as rejected, but by then its files were already written.
+     * Serializing means the second push's live read happens only after the
+     * first has finished, so it correctly sees the first's new head and is
+     * rejected before the hook ever touches a file.
+     *
+     * @param projectId The project being pushed to
+     * @param block The push handling to run with that project serialized
+     */
+    suspend fun <T> withPushLock(projectId: UUID, block: suspend () -> T): T =
+        pushLocks.computeIfAbsent(projectId) { Mutex() }.withLock { block() }
 
     /**
      * Opens a project's repository, creating it if this is the first access.
