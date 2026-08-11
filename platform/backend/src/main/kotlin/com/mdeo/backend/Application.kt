@@ -113,7 +113,12 @@ fun Application.module(appConfig: AppConfig) {
         // Outside the session and JWT blocks on purpose: git clients cannot
         // present either, so these routes authenticate the HTTP basic
         // credentials themselves.
-        gitRoutes(services.gitRepositoryService, services.projectService, services.userService)
+        gitRoutes(
+            services.gitRepositoryService,
+            services.projectService,
+            services.userService,
+            appConfig.git.maxPushPackSizeBytes
+        )
         
         authenticate(AUTH_SESSION, AUTH_JWT, optional = true) {
             fileRoutes(services.fileService, services.projectService)

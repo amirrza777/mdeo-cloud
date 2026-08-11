@@ -11,15 +11,19 @@ import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.utils.io.jvm.javaio.*
+import org.eclipse.jgit.errors.UnpackException
 import org.eclipse.jgit.lib.Constants
 import org.eclipse.jgit.transport.PacketLineOut
 import org.eclipse.jgit.transport.ReceiveCommand
 import org.eclipse.jgit.transport.ReceivePack
 import org.eclipse.jgit.transport.RefAdvertiser
 import org.eclipse.jgit.transport.UploadPack
+import org.slf4j.LoggerFactory
 import java.io.ByteArrayOutputStream
 import java.util.Base64
 import java.util.UUID
+
+private val logger = LoggerFactory.getLogger("GitRoutes")
 
 /**
  * Serves projects as git repositories over git's smart HTTP protocol.
@@ -35,11 +39,13 @@ import java.util.UUID
  * @param gitRepositoryService Opens and publishes project repositories
  * @param projectService Used to check the caller may read the project
  * @param userService Used to verify basic credentials
+ * @param maxPushPackSizeBytes Largest pack a push may send; see [com.mdeo.backend.config.GitConfig]
  */
 fun Route.gitRoutes(
     gitRepositoryService: GitRepositoryService,
     projectService: ProjectService,
-    userService: UserService
+    userService: UserService,
+    maxPushPackSizeBytes: Long
 ) {
     route("/git/{projectId}") {
         /**
@@ -123,6 +129,10 @@ fun Route.gitRoutes(
                 repository.use {
                     val receivePack = ReceivePack(repository)
                     receivePack.setBiDirectionalPipe(false)
+                    // Checked while unpacking, before any command runs, so an
+                    // oversized push is refused outright rather than applying
+                    // some of its files before running out of room.
+                    receivePack.setMaxPackSizeLimit(maxPushPackSizeBytes)
                     // A push that is not a fast forward is refused, and the user
                     // merges locally with tools they already know. That is what
                     // removes the need for any conflict resolution here.
@@ -159,7 +169,19 @@ fun Route.gitRoutes(
                         }
                     }
 
-                    receivePack.receive(requestBody.inputStream(), this, null)
+                    try {
+                        receivePack.receive(requestBody.inputStream(), this, null)
+                    } catch (e: UnpackException) {
+                        // JGit already wrote the rejection (for instance
+                        // exceeding the size limit above) into the response
+                        // as a normal git status report before throwing this,
+                        // so the client already saw a clean error. Without
+                        // this catch it would also reach the application's
+                        // generic handler and log as a 500, which reads as a
+                        // server crash rather than the expected rejection of
+                        // an oversized or malformed push that it is.
+                        logger.info("Rejected push for project {}: {}", projectId, e.message)
+                    }
                 }
             }
         }
