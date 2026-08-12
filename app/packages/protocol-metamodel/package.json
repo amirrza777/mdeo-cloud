@@ -1,7 +1,16 @@
 {
     "name": "@mdeo/protocol-metamodel",
-    "version": "0.1.0",
+    "version": "0.2.11",
+    "license": "EPL-2.0",
     "type": "module",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/mde-optimiser/mdeo-cloud.git",
+        "directory": "app/packages/protocol-metamodel"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
     "exports": {
         ".": {
             "types": "./dist/index.d.ts",
@@ -10,6 +19,8 @@
     },
     "files": [
         "dist",
-        "src"
+        "src",
+        "LICENSE",
+        "LICENSES"
     ]
 }

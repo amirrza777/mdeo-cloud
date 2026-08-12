@@ -137,6 +137,17 @@ function handleDrop(event: DragEvent) {
         hoverTimeout.value = null;
     }
 
+    if (event.dataTransfer != undefined && event.dataTransfer.files.length > 0) {
+        // Always consumed here, even for a non-folder item, so an OS file
+        // drop on a file never bubbles up and is silently treated as a drop
+        // on the tree's background (uploading to the project root instead).
+        event.stopPropagation();
+        if (props.isFolder) {
+            treeContext.dragAndDrop.value.callbacks?.onFilesDropped?.(event.dataTransfer.files, props.data, event);
+        }
+        return;
+    }
+
     const draggedItemData = event.dataTransfer?.getData("application/json");
     if (!draggedItemData) {
         return;
