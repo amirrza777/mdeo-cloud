@@ -1,13 +1,29 @@
 {
     "name": "@mdeo/language-common",
-    "version": "0.1.0",
+    "version": "0.2.11",
+    "license": "EPL-2.0",
     "type": "module",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/mde-optimiser/mdeo-cloud.git",
+        "directory": "app/packages/language-common"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "files": [
         "dist",
-        "src"
+        "src",
+        "LICENSE",
+        "LICENSES"
     ],
+    "dependencies": {
+        "@mdeo/plugin": "^0.2.11",
+        "lucide": "^1.29.0",
+        "munkres": "^2.0.4"
+    },
     "devDependencies": {
         "@eclipse-glsp/graph": "^2.6.0",
         "@eclipse-glsp/protocol": "^2.6.0",
@@ -22,10 +38,5 @@
         "vscode-jsonrpc": "8.2.0",
         "vscode-languageserver-protocol": "^3.17.5",
         "vscode-languageserver-types": "^3.17.5"
-    },
-    "dependencies": {
-        "@mdeo/plugin": "^0.1.0",
-        "lucide": "^0.575.0",
-        "munkres": "^2.0.4"
     }
 }

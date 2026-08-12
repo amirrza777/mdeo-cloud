@@ -12,7 +12,7 @@ import {
     AST_HANDLER_KEY,
     startLanguageService
 } from "@mdeo/service-common";
-import type { LanguagePlugin } from "@mdeo/plugin";
+import { DOCUMENTATION_BASE_URL, type LanguagePlugin } from "@mdeo/plugin";
 
 const icon = convertIcon(Settings2);
 
@@ -31,7 +31,8 @@ const configOptimizationLanguagePlugin: LanguagePlugin = {
     },
     graphicalEditorPlugin: undefined,
     textualEditorPlugin: undefined,
-    isGenerated: true
+    isGenerated: true,
+    documentationUrl: `${DOCUMENTATION_BASE_URL}/plugins/config-optimization`
 };
 
 initializePluginContext();

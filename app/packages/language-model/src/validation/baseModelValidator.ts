@@ -3,6 +3,7 @@ import type { AstReflection } from "@mdeo/language-common";
 import {
     Association,
     Enum,
+    Property,
     RangeMultiplicity,
     SingleMultiplicity,
     resolveClassChain,
@@ -35,6 +36,14 @@ export interface BaseLink extends AstNode {
  */
 export interface BaseObjectInstance {
     class?: { ref?: AstNode };
+}
+
+/**
+ * Base property assignment interface for the `property = value` constructs of both the model
+ * and the model transformation language.
+ */
+export interface BasePropertyAssignment extends AstNode {
+    name?: { ref?: AstNode };
 }
 
 /**
@@ -245,6 +254,55 @@ export abstract class BaseModelValidator extends BaseMetamodelHelper {
         }
 
         return undefined;
+    }
+
+    /**
+     * Validates that no property is assigned more than once within the same object.
+     *
+     * A second assignment to the same property silently overwrites the first one when the AST is
+     * converted to model data, so the duplicate is reported on every occurrence to make the
+     * conflict visible at both ends.
+     *
+     * @param assignments The property assignments of a single object instance
+     * @param accept The validation acceptor
+     */
+    protected validateNoDuplicatePropertyAssignments(
+        assignments: BasePropertyAssignment[],
+        accept: ValidationAcceptor
+    ): void {
+        const assignmentsByProperty = new Map<string, BasePropertyAssignment[]>();
+
+        for (const assignment of assignments) {
+            const propertyRef = assignment.name?.ref;
+            if (!propertyRef || !this.reflection.isInstance(propertyRef, Property)) {
+                continue;
+            }
+
+            const propertyName = (propertyRef as PropertyType).name;
+            if (!propertyName) {
+                continue;
+            }
+
+            const existing = assignmentsByProperty.get(propertyName);
+            if (existing) {
+                existing.push(assignment);
+            } else {
+                assignmentsByProperty.set(propertyName, [assignment]);
+            }
+        }
+
+        for (const [propertyName, duplicates] of assignmentsByProperty) {
+            if (duplicates.length < 2) {
+                continue;
+            }
+
+            for (const duplicate of duplicates) {
+                accept("error", `Duplicate assignment of property '${propertyName}': assign it only once.`, {
+                    node: duplicate,
+                    property: "name"
+                });
+            }
+        }
     }
 
     /**

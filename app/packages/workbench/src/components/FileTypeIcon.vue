@@ -4,7 +4,7 @@
 </template>
 <script setup lang="ts">
 import type { ResolvedWorkbenchLanguagePlugin } from "@/data/plugin/plugin";
-import { Icon, FileIcon } from "lucide-vue-next";
+import { Icon, FileIcon } from "@lucide/vue";
 
 defineModel<ResolvedWorkbenchLanguagePlugin | undefined>();
 </script>

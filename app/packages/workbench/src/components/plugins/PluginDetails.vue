@@ -77,7 +77,7 @@
 
 <script setup lang="ts">
 import type { Plugin } from "@mdeo/plugin";
-import { Link, Icon } from "lucide-vue-next";
+import { Link, Icon } from "@lucide/vue";
 import { Separator } from "@/components/ui/separator";
 import { computed } from "vue";
 

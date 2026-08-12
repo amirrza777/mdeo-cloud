@@ -21,7 +21,7 @@ import {
     AST_HANDLER_KEY,
     startLanguageService
 } from "@mdeo/service-common";
-import type { LanguagePlugin } from "@mdeo/plugin";
+import { DOCUMENTATION_BASE_URL, type LanguagePlugin } from "@mdeo/plugin";
 import { ServiceMdeoMetamodelResolver } from "./serviceMdeoMetamodelResolver.js";
 
 const icon = convertIcon(Settings2);
@@ -41,7 +41,8 @@ const configMdeoLanguagePlugin: LanguagePlugin = {
     },
     graphicalEditorPlugin: undefined,
     textualEditorPlugin: undefined,
-    isGenerated: true
+    isGenerated: true,
+    documentationUrl: `${DOCUMENTATION_BASE_URL}/plugins/config-mdeo`
 };
 
 initializePluginContext();

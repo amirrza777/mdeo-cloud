@@ -63,7 +63,7 @@ import type { EditorTab } from "@/data/tab/editorTab";
 import { EditorState } from "./editorState";
 import GraphicalEditor from "./GraphicalEditor.vue";
 import MarkdownRenderer from "./MarkdownRenderer.vue";
-import { AlertCircle, Settings } from "lucide-vue-next";
+import { AlertCircle, Settings } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import ManagePluginsDialog from "../projects/ManagePluginsDialog.vue";
 import type { Uri } from "vscode";

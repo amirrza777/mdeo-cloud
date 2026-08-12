@@ -1,11 +1,19 @@
 {
     "name": "@mdeo/service-model-transformation",
-    "version": "0.1.0",
+    "version": "0.2.11",
     "private": true,
+    "license": "EPL-2.0",
     "type": "module",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/mde-optimiser/mdeo-cloud.git",
+        "directory": "app/packages/service-model-transformation"
+    },
     "files": [
         "dist",
-        "src"
+        "src",
+        "LICENSE",
+        "LICENSES"
     ],
     "scripts": {
         "build:static": "vite build",
@@ -14,16 +22,16 @@
         "watch": "tsx watch src/index.ts"
     },
     "dependencies": {
-        "@mdeo/editor-model-transformation": "^0.1.0",
-        "@mdeo/language-common": "^0.1.0",
-        "@mdeo/language-expression": "^0.1.0",
-        "@mdeo/language-metamodel": "^0.1.0",
-        "@mdeo/language-model": "^0.1.0",
-        "@mdeo/language-model-transformation": "^0.1.0",
-        "@mdeo/language-shared": "^0.1.0",
-        "@mdeo/plugin": "^0.1.0",
-        "@mdeo/protocol-model-transformation": "^0.1.0",
-        "@mdeo/service-common": "^0.1.0"
+        "@mdeo/editor-model-transformation": "^0.2.11",
+        "@mdeo/language-common": "^0.2.11",
+        "@mdeo/language-expression": "^0.2.11",
+        "@mdeo/language-metamodel": "^0.2.11",
+        "@mdeo/language-model": "^0.2.11",
+        "@mdeo/language-model-transformation": "^0.2.11",
+        "@mdeo/language-shared": "^0.2.11",
+        "@mdeo/plugin": "^0.2.11",
+        "@mdeo/protocol-model-transformation": "^0.2.11",
+        "@mdeo/service-common": "^0.2.11"
     },
     "devDependencies": {
         "@types/node": "^25.3.1",

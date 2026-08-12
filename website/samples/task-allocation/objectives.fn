@@ -1,0 +1,40 @@
+using "./tasks.mm"
+
+// Total effort of every task that nobody has picked up yet.
+fun unassignedEffort(): int {
+    var total = 0
+    for (task in Task.all()) {
+        if (task.assignee == null) {
+            total = total + task.effort
+        }
+    }
+    return total
+}
+
+// How much the busiest developer is overloaded beyond their capacity.
+fun maxOverload(): int {
+    var worst = 0
+    for (developer in Developer.all()) {
+        var assigned = 0
+        for (task in developer.tasks) {
+            assigned = assigned + task.effort
+        }
+        var overload = assigned - developer.capacity
+        if (overload > worst) {
+            worst = overload
+        }
+    }
+    return worst
+}
+
+// Constraint: every high priority task has to be assigned.
+// 0 means satisfied, any larger value is the magnitude of the violation.
+fun unassignedHighPriority(): int {
+    var violations = 0
+    for (task in Task.all()) {
+        if (task.priority == Priority.HIGH && task.assignee == null) {
+            violations = violations + 1
+        }
+    }
+    return violations
+}

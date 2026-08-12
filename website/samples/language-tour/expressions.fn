@@ -1,0 +1,82 @@
+using "./shapes.mm"
+
+// Literals of every supported kind.
+fun literals(): int {
+    var integer = 42
+    var big = 42L
+    var single = 1.5f
+    var precise = 1.5
+    var text = "with \"escapes\" and \n newlines"
+    var flag = true
+    var nothing: string? = null
+    var numbers = listOf(1, 2, 3)
+    println(text)
+    return integer
+}
+
+// Operators, grouped by precedence from tightest to loosest.
+fun operators(a: int, b: int): boolean {
+    var arithmetic = a * b / 2 + a - b % 3
+    var comparison = arithmetic < 100 && arithmetic >= 0
+    var equality = a == b || a != b
+    var ternary = comparison ? arithmetic : 0
+    return equality && ternary >= 0
+}
+
+// Null handling: null-safe access, elvis and the non-null assertion.
+fun nullHandling(shape: Shape?): string {
+    var maybeName = shape?.name
+    var name = maybeName ?? "unnamed"
+    if (shape != null) {
+        return shape!!.name
+    }
+    return name
+}
+
+// Type checks and casts.
+fun area(shape: Shape): double {
+    if (shape is Rectangle) {
+        var rectangle = shape as Rectangle
+        return rectangle.width * rectangle.height
+    }
+    var circle = shape as? Circle
+    if (circle != null) {
+        return 3.14159 * circle.radius * circle.radius
+    }
+    return 0.0
+}
+
+// Control flow and collection access through the generated `all()` accessor.
+fun visibleShapeCount(): int {
+    var count = 0
+    for (shape in Shape.all()) {
+        if (!shape.visible) {
+            continue
+        }
+        if (shape.colour == Colour.RED) {
+            count = count + 2
+        } else if (shape.colour == Colour.GREEN) {
+            count = count + 1
+        } else {
+            count = count + 1
+        }
+    }
+
+    var guard = 0
+    while (guard < 10) {
+        guard = guard + 1
+        if (guard > 5) {
+            break
+        }
+    }
+    return count
+}
+
+// Lambdas are ordinary expressions and can be passed to collection operations.
+fun totalArea(): double {
+    var total = 0.0
+    for (shape in Shape.all()) {
+        total = total + area(shape)
+    }
+    return total
+}

@@ -12,7 +12,7 @@ import {
     startLanguageService
 } from "@mdeo/service-common";
 import { MODEL_PLUGIN_REQUEST_KEY } from "@mdeo/service-model-common";
-import type { LanguagePlugin } from "@mdeo/plugin";
+import { DOCUMENTATION_BASE_URL, type LanguagePlugin } from "@mdeo/plugin";
 
 const icon = convertIcon(Table);
 
@@ -31,7 +31,8 @@ const modelCsvLanguagePlugin: LanguagePlugin = {
     },
     graphicalEditorPlugin: undefined,
     textualEditorPlugin: undefined,
-    isGenerated: true
+    isGenerated: true,
+    documentationUrl: `${DOCUMENTATION_BASE_URL}/plugins/model-csv`
 };
 
 initializePluginContext();
@@ -51,7 +52,7 @@ const modelCsvServicePlugin: ServicePluginDefinition = {
     contributionPlugins: [
         {
             languageId: "model",
-            description: "Provides import CSV { ClassName from \"file.csv\" } syntax for the model language",
+            description: 'Provides import CSV { ClassName from "file.csv" } syntax for the model language',
             additionalKeywords: ["import", "CSV", "from"],
             serverContributionPlugins: [createModelCsvContributionPlugin()]
         }

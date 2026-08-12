@@ -16,7 +16,7 @@ import {
 } from "@mdeo/service-common";
 import { convertIcon } from "@mdeo/language-common";
 import type { ScriptServices } from "@mdeo/language-script";
-import type { LanguagePlugin } from "@mdeo/plugin";
+import { DOCUMENTATION_BASE_URL, type LanguagePlugin } from "@mdeo/plugin";
 
 /**
  * Language plugin definition for the script language.
@@ -57,7 +57,8 @@ const scriptLanguagePlugin: LanguagePlugin = {
             ]
         })
     },
-    isGenerated: false
+    isGenerated: false,
+    documentationUrl: `${DOCUMENTATION_BASE_URL}/plugins/script`
 };
 
 initializePluginContext();

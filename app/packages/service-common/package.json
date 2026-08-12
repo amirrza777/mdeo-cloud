@@ -1,7 +1,16 @@
 {
     "name": "@mdeo/service-common",
-    "version": "0.1.0",
+    "version": "0.2.11",
+    "license": "EPL-2.0",
     "type": "module",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/mde-optimiser/mdeo-cloud.git",
+        "directory": "app/packages/service-common"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "exports": {
@@ -12,7 +21,9 @@
     },
     "files": [
         "dist",
-        "src"
+        "src",
+        "LICENSE",
+        "LICENSES"
     ],
     "dependencies": {
         "@eclipse-glsp/graph": "^2.6.0",
@@ -20,8 +31,8 @@
         "@eclipse-glsp/server": "^2.6.0",
         "@fastify/cors": "^11.2.0",
         "@fastify/static": "^9.0.0",
-        "@mdeo/language-common": "^0.1.0",
-        "@mdeo/plugin": "^0.1.0",
+        "@mdeo/language-common": "^0.2.11",
+        "@mdeo/plugin": "^0.2.11",
         "elkjs": "^0.11.0",
         "fastify": "^5.7.4",
         "inversify": "^6.2.2",
