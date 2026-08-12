@@ -21,16 +21,27 @@ import {
     type ActionHandlerRegistryAdditionalServices,
     DefaultActionProvider
 } from "@mdeo/language-shared";
-import { generateModelContributionGrammar, ModelTerminals, ModelScopeProvider, ModelExternalReferenceCollector } from "@mdeo/language-model";
+import {
+    generateModelContributionGrammar,
+    ModelTerminals,
+    ModelScopeProvider,
+    ModelExternalReferenceCollector,
+    type ModelDiagramContributionAdditionalServices
+} from "@mdeo/language-model";
 import { Class } from "@mdeo/language-metamodel";
 import { createModelCsvContributionPlugin } from "./plugin/modelCsvContributionPlugin.js";
+import { CsvDiagramContribution } from "./features/csvDiagramContribution.js";
 
 /**
  * Combined services type for the standalone model-csv language.
  * Reuses the base Model language's services, since the standalone grammar's
  * root is a real `Model` node (an `import` line plus the CSV import block).
+ * Also provides `diagram.Contribution`, so `language-model`'s diagram
+ * factory can render CSV-imported instances without knowing CSV exists.
  */
-export type ModelCsvServices = ExternalReferenceAdditionalServices & ActionHandlerRegistryAdditionalServices;
+export type ModelCsvServices = ExternalReferenceAdditionalServices &
+    ActionHandlerRegistryAdditionalServices &
+    ModelDiagramContributionAdditionalServices;
 
 /**
  * Deserialization context for the CSV grammar.
@@ -72,6 +83,9 @@ const modelCsvPlugin: LangiumLanguagePlugin<ModelCsvServices> = {
         action: {
             ActionHandlerRegistry: () => new ActionHandlerRegistry(),
             ActionProvider: () => new DefaultActionProvider()
+        },
+        diagram: {
+            Contribution: (services) => new CsvDiagramContribution(services)
         }
     },
     postCreate(services) {

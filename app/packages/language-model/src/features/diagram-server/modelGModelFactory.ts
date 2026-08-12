@@ -1,4 +1,5 @@
 import type { GModelElement, GModelRoot } from "@eclipse-glsp/server";
+import type { AstNode, ServiceRegistry } from "langium";
 import {
     sharedImport,
     BaseGModelFactory,
@@ -6,14 +7,12 @@ import {
     GHorizontalDivider,
     EdgeLayoutMetadataUtil,
     NodeLayoutMetadataUtil,
-    parseIdentifier,
-    resolveRelativePath,
-    parseCsv
+    parseIdentifier
 } from "@mdeo/language-shared";
 import type { ModelIdRegistry, GraphMetadata } from "@mdeo/language-shared";
 import type { NodeLayoutMetadata, EdgeLayoutMetadata } from "@mdeo/protocol-common";
 import { ID } from "@mdeo/language-common";
-import { resolveClassChain, type ClassType, type PropertyType } from "@mdeo/language-metamodel";
+import { resolveClassChain, type ClassType } from "@mdeo/language-metamodel";
 import type {
     PartialModel,
     PartialObjectInstance,
@@ -35,26 +34,18 @@ import {
     type EnumValueType,
     type SingleValueType
 } from "../../grammar/modelTypes.js";
-import { getWrapperInterfaceName } from "../../plugin/resolvePlugins.js";
+import type { ModelDataInstance, ModelDataPropertyValue } from "../modelData.js";
+import type {
+    ModelDiagramContributionAdditionalServices,
+    ModelDiagramContributionData,
+    ModelDiagramContributionServices
+} from "../../plugin/modelDiagramContribution.js";
+import type { ModelServices } from "../../modelPlugin.js";
 
 const { injectable } = sharedImport("inversify");
 const { GGraph } = sharedImport("@eclipse-glsp/server");
 
 type GGraphType = ReturnType<typeof GGraph.builder>["proxy"];
-
-/**
- * Reserved CSV column holding a row's identifier for cross-object references.
- * It is not a metamodel property, so it is never displayed as one.
- */
-const CSV_ID_COLUMN = "_id";
-
-/**
- * A CSV column that maps onto a metamodel property of the imported class.
- */
-interface CsvColumnBinding {
-    index: number;
-    property: PropertyType;
-}
 
 /**
  * Factory for creating GLSP graph models from model AST.
@@ -76,7 +67,7 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
         const extracted = await this.extractElements(sourceModel);
         await this.createObjectNodes(graph, extracted.objects, idRegistry);
         await this.createLinkEdges(graph, extracted.links, idRegistry);
-        await this.createCsvNodes(graph, sourceModel);
+        await this.createContributedNodes(graph, sourceModel);
         return graph;
     }
 
@@ -488,186 +479,177 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
         return nodes;
     }
     /**
-     * Renders diagram nodes for the CSV import contribution, if present.
+     * Renders diagram nodes for contribution plugins whose import appears in
+     * this model, if the plugin provides diagram data for it.
      *
-     * The Model language's grammar has no compile-time knowledge of CSV (it's a
-     * plugin contribution resolved generically via `model.imports`), but rendering
-     * synthetic instance nodes from CSV row data has no equivalent generic extension
-     * point today, so this reads the CSV plugin's contributed import structurally
-     * by its wrapper type name rather than importing its types directly (which would
-     * create a circular package dependency, since language-model-csv depends on
-     * language-model for the contribution plugin contract).
+     * The Model language's grammar has no compile-time knowledge of any
+     * particular import format: an import is matched against the active
+     * contribution plugins generically, by wrapper type name, the same way
+     * grammar resolution itself already matches them (see
+     * `resolveModelPlugins`). Rendering follows the same principle: a
+     * plugin's own diagram-rendering service, if it has one, is looked up by
+     * `languageKey` from the shared Langium `ServiceRegistry` every plugin's
+     * language services are already registered in (the workbench loads every
+     * enabled plugin's own `language.js`, not just the merged grammar). This
+     * is the same pattern `language-config`'s `ConfigDelegatingScopeProvider`
+     * already uses for scope resolution, so no new mechanism was needed. A
+     * plugin that does not implement the service is simply skipped, so this
+     * has no effect on a project that doesn't use one.
      *
-     * A real generic extension point (a contribution plugin owning its own node
-     * rendering, not language-model reaching into its import) is tracked as #35.
-     * It is not a small follow-up: the workbench, where this diagram actually
-     * renders, loads plugins as a merged grammar only, with no mechanism to call
-     * into another plugin's code at runtime, unlike the backend's plugin-RPC path
-     * (which this session confirmed does not build a live GLSP model today).
-     * Building that generic point means giving plugins a way to contribute their
-     * own rendering the same way `language.js` is already served and dynamically
-     * imported per plugin, which is real, separate work.
-     *
-     * The CSV file itself is read through `LangiumDocuments` rather than the raw
-     * `FileSystemProvider`, so this benefits from Langium's own document caching
-     * and works no matter which `FileSystemProvider` is bound, the same way the
-     * metamodel document is read elsewhere in this codebase rather than opened
-     * as a plain file.
+     * @param graph The graph to add nodes and edges to
+     * @param model The model, whose imports are checked against active contribution plugins
      */
-    private async createCsvNodes(graph: GGraphType, model: PartialModel): Promise<void> {
-        interface CsvClassImportShape {
-            class?: { ref?: ClassType };
-            file?: string;
-            mappings?: { csvColumn?: string; property?: string }[];
+    private async createContributedNodes(graph: GGraphType, model: PartialModel): Promise<void> {
+        const contributionImports = (this.modelState.languageServices as unknown as ModelServices).contributions
+            .Imports;
+        if (contributionImports.size === 0 || model.imports == undefined) {
+            return;
         }
 
-        const csvImport = model.imports?.find((imp) => (imp as { $type?: string }).$type === getWrapperInterfaceName("CSV"));
-        const csvImportContent = (csvImport as { content?: { imports?: CsvClassImportShape[] } } | undefined)?.content;
-        if (csvImportContent?.imports == undefined) return;
-        const doc = this.modelState.sourceModel?.$document;
-        if (!doc) return;
+        const languageKeyByWrapperType = new Map<string, string>();
+        for (const namingInfo of contributionImports.values()) {
+            languageKeyByWrapperType.set(namingInfo.interface.name, namingInfo.plugin.languageKey);
+        }
 
+        const registry = this.modelState.languageServices.shared.ServiceRegistry;
         const validatedMetadata = await this.modelState.getValidatedMetadata();
 
-        let nodeIndex = 0;
-        // Numbered per class rather than per import, so two imports of the same
-        // class from different files do not produce the same instance names.
-        // Matches how the import itself names them.
-        const rowsPerClass = new Map<string, number>();
-        for (const entry of csvImportContent.imports) {
-            const classRef = entry.class?.ref as ClassType | undefined;
-            if (classRef == undefined) continue;
-            try {
-                const uri = resolveRelativePath(doc, entry.file ?? "");
-                const csvDocument = await this.modelState.languageServices.shared.workspace.LangiumDocuments.getOrCreateDocument(
-                    uri
-                );
-                const csvContent = csvDocument.textDocument.getText();
-                const rows = parseCsv(csvContent);
-                if (rows.length < 2) continue;
-                const classChain = resolveClassChain(classRef, this.reflection);
-                const classHierarchy = classChain.map((c) => c.name);
-                const columns = this.resolveCsvColumns(rows[0], classChain, entry.mappings);
-                const nameOffset = rowsPerClass.get(classRef.name) ?? 0;
-                rowsPerClass.set(classRef.name, nameOffset + rows.length - 1);
-                rows.slice(1).forEach((row: string[], rowIndex: number) => {
-                    const instanceName = `${classRef.name}_${nameOffset + rowIndex}`;
-                    const nodeId = `csv-node-${nodeIndex++}`;
-                    const metadata = validatedMetadata.nodes[nodeId]?.meta ?? {};
-                    const node = GObjectNode.builder()
-                        .id(nodeId)
-                        .name(instanceName)
-                        .typeName(classRef.name)
-                        .classHierarchy(classHierarchy)
-                        .meta(metadata)
-                        .build();
-                    node.children.push(
-                        ...this.createObjectHeader(nodeId, instanceName, classRef.name),
-                        ...this.createCsvPropertyAssignments(nodeId, columns, row)
-                    );
-                    graph.children.push(node);
-                });
-            } catch {
-                // skip unreadable CSV
-            }
-        }
-    }
-
-    /**
-     * Resolves which CSV columns correspond to properties of the imported class.
-     *
-     * When the import declares an explicit mapping, only the mapped columns are
-     * used, so a column can also be left out deliberately. Otherwise columns are
-     * matched to properties by name across the class' whole extension chain. Either
-     * way this mirrors how the import itself resolves them, so the diagram shows
-     * the same columns the import reads. Unmatched columns and the reserved `_id`
-     * row identifier are dropped, so they are simply not shown.
-     *
-     * @param header The CSV header row
-     * @param classChain The imported class and its extended classes
-     * @param mappings The import's explicit column to property mappings, if any
-     * @returns The column index and property for every column that maps to one
-     */
-    private resolveCsvColumns(
-        header: string[],
-        classChain: ClassType[],
-        mappings?: { csvColumn?: string; property?: string }[]
-    ): CsvColumnBinding[] {
-        const propertiesByName = new Map<string, PropertyType>();
-        for (const cls of classChain) {
-            for (const property of cls.properties ?? []) {
-                if (property?.name != undefined && !propertiesByName.has(property.name)) {
-                    propertiesByName.set(property.name, property);
-                }
-            }
-        }
-
-        const columns: CsvColumnBinding[] = [];
-
-        if (mappings != undefined && mappings.length > 0) {
-            for (const mapping of mappings) {
-                if (mapping.csvColumn == undefined || mapping.property == undefined) {
-                    continue;
-                }
-                const index = header.indexOf(mapping.csvColumn);
-                const property = propertiesByName.get(mapping.property);
-                if (index >= 0 && property != undefined) {
-                    columns.push({ index, property });
-                }
-            }
-            return columns;
-        }
-
-        header.forEach((columnName, index) => {
-            if (columnName === CSV_ID_COLUMN) {
-                return;
-            }
-            const property = propertiesByName.get(columnName);
-            if (property != undefined) {
-                columns.push({ index, property });
-            }
-        });
-        return columns;
-    }
-
-    /**
-     * Creates the property assignments compartment for a CSV-imported node.
-     *
-     * Mirrors {@link createPropertyAssignments}, but reads values straight from a
-     * CSV row instead of from property assignment AST nodes, since CSV-imported
-     * instances have no backing AST. The labels are read-only because editing them
-     * could not be written back to the CSV file.
-     *
-     * @param nodeId The ID of the object node
-     * @param columns The columns that map to properties, from {@link resolveCsvColumns}
-     * @param row The CSV data row for this node
-     * @returns Array of GModelElements for the properties compartment
-     */
-    private createCsvPropertyAssignments(
-        nodeId: string,
-        columns: CsvColumnBinding[],
-        row: string[]
-    ): GModelElement[] {
-        const propertyLabels: GPropertyLabel[] = [];
-        for (const { index, property } of columns) {
-            const rawValue = row[index];
-            if (rawValue == undefined || rawValue.trim() === "") {
+        for (const imp of model.imports) {
+            const wrapperType = (imp as { $type?: string } | undefined)?.$type;
+            const content = (imp as { content?: AstNode } | undefined)?.content;
+            if (wrapperType == undefined || content == undefined) {
                 continue;
             }
-            const propertyName = this.modelState.languageServices.AstSerializer.serializePrimitive(
-                { value: property.name },
-                ID
+
+            const languageKey = languageKeyByWrapperType.get(wrapperType);
+            if (languageKey == undefined) {
+                continue;
+            }
+
+            const contribution = this.getDiagramContribution(registry, languageKey);
+            if (contribution == undefined) {
+                continue;
+            }
+
+            try {
+                const data = await contribution.computeDiagramData(content);
+                this.renderContributedData(graph, languageKey, data, validatedMetadata);
+            } catch {
+                // One plugin's data failing to compute should not break the
+                // rest of the diagram.
+            }
+        }
+    }
+
+    /**
+     * Looks up a contribution plugin's own diagram-rendering service, from
+     * the same shared registry every plugin's language services are
+     * registered in.
+     *
+     * Langium's `ServiceRegistry` only exposes lookup by file extension or
+     * URI publicly. Every plugin's services are also indexed by language id
+     * internally (a language key is exactly that id), which is what this
+     * reaches into instead, the same way `language-config`'s
+     * `getServicesByLanguageId` does.
+     *
+     * @param registry The shared Langium service registry
+     * @param languageKey The contributing plugin's language key
+     * @returns The plugin's diagram contribution service, if it provides one
+     */
+    private getDiagramContribution(registry: ServiceRegistry, languageKey: string): ModelDiagramContributionServices | undefined {
+        // @ts-expect-error - accessing a protected property to look services up by language id
+        const services = registry.languageIdMap.get(languageKey) as ModelDiagramContributionAdditionalServices | undefined;
+        return services?.diagram?.Contribution;
+    }
+
+    /**
+     * Renders the instances and links a contribution plugin computed for its
+     * own import.
+     *
+     * Node ids are namespaced by the contributing plugin's language key
+     * rather than a per-format prefix the host would have to invent, so a
+     * second contribution plugin's instances cannot collide with the
+     * first's, and an instance's id stays stable across re-renders as long
+     * as its name does (unlike a per-render counter would).
+     *
+     * @param graph The graph to add nodes and edges to
+     * @param languageKey The contributing plugin's language key
+     * @param data The instances and links it computed
+     * @param validatedMetadata Layout metadata for node and edge placement
+     */
+    private renderContributedData(
+        graph: GGraphType,
+        languageKey: string,
+        data: ModelDiagramContributionData,
+        validatedMetadata: GraphMetadata
+    ): void {
+        const nodeIdByInstanceName = new Map<string, string>();
+
+        for (const instance of data.instances) {
+            const nodeId = `imported-${languageKey}-${instance.name}`;
+            nodeIdByInstanceName.set(instance.name, nodeId);
+            const metadata = (validatedMetadata.nodes[nodeId]?.meta as NodeLayoutMetadata | undefined) ?? {};
+
+            const node = GObjectNode.builder()
+                .id(nodeId)
+                .name(instance.name)
+                .typeName(instance.className)
+                .meta(metadata)
+                .build();
+
+            node.children.push(
+                ...this.createObjectHeader(nodeId, instance.name, instance.className),
+                ...this.createContributedPropertyAssignments(nodeId, instance)
             );
-            propertyLabels.push(
-                GPropertyLabel.builder()
-                    .id(`${nodeId}__prop-${index}`)
-                    .text(`${propertyName} = ${this.formatCsvValue(rawValue, property)}`)
-                    .readonly(true)
-                    .build()
-            );
+            graph.children.push(node);
         }
 
-        if (propertyLabels.length === 0) {
+        data.links.forEach((link, index) => {
+            const sourceId = nodeIdByInstanceName.get(link.sourceName);
+            const targetId = nodeIdByInstanceName.get(link.targetName);
+            if (sourceId == undefined || targetId == undefined) {
+                return;
+            }
+
+            const edgeId = `imported-${languageKey}-link-${index}`;
+            const metadata =
+                (validatedMetadata.edges[edgeId]?.meta as EdgeLayoutMetadata | undefined) ?? EdgeLayoutMetadataUtil.create();
+            const edgeBuilder = GLinkEdge.builder().id(edgeId).sourceId(sourceId).targetId(targetId).meta(metadata);
+            if (link.sourceProperty != undefined) {
+                edgeBuilder.sourceProperty(link.sourceProperty);
+            }
+            if (link.targetProperty != undefined) {
+                edgeBuilder.targetProperty(link.targetProperty);
+            }
+            const edge = edgeBuilder.build();
+
+            // Matches createLinkEdge's convention below: a source property is
+            // shown as a label near the target end, and vice versa.
+            if (link.sourceProperty != undefined) {
+                edge.children.push(...this.createLinkEndNodes(edgeId, link.sourceProperty, "target", validatedMetadata));
+            }
+            if (link.targetProperty != undefined) {
+                edge.children.push(...this.createLinkEndNodes(edgeId, link.targetProperty, "source", validatedMetadata));
+            }
+
+            graph.children.push(edge);
+        });
+    }
+
+    /**
+     * Creates the property assignments compartment for an instance a
+     * contribution plugin computed, mirroring {@link createPropertyAssignments}
+     * but reading from already-computed data rather than property assignment
+     * AST nodes, since such an instance has no backing AST. The labels are
+     * read-only because editing them has nowhere to write back to.
+     *
+     * @param nodeId The ID of the object node
+     * @param instance The computed instance
+     * @returns Array of GModelElements for the properties compartment
+     */
+    private createContributedPropertyAssignments(nodeId: string, instance: ModelDataInstance): GModelElement[] {
+        const entries = Object.entries(instance.properties);
+        if (entries.length === 0) {
             return [];
         }
 
@@ -676,52 +658,57 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
             .type(ModelElementType.COMPARTMENT)
             .id(`${nodeId}__properties-compartment`)
             .build();
-        propertiesCompartment.children.push(...propertyLabels);
+
+        for (const [propName, propValue] of entries) {
+            const serializedName = this.modelState.languageServices.AstSerializer.serializePrimitive(
+                { value: propName },
+                ID
+            );
+            propertiesCompartment.children.push(
+                GPropertyLabel.builder()
+                    .id(`${nodeId}__prop-${propName}`)
+                    .text(`${serializedName} = ${this.formatContributedValue(propValue)}`)
+                    .readonly(true)
+                    .build()
+            );
+        }
 
         return [divider, propertiesCompartment];
     }
 
     /**
-     * Formats a raw CSV cell for display, following the property's declared type.
+     * Formats a value a contribution plugin computed for display, the same
+     * way {@link formatPropertyValue} formats a hand-authored one.
      *
-     * Uses the same type interpretation as the CSV import itself, so the diagram
-     * shows the value the import would produce, and renders it the same way
-     * hand-authored values are rendered. Values that don't parse as their declared
-     * numeric type fall back to being shown as text rather than as `NaN`.
-     *
-     * @param rawValue The raw cell text
-     * @param property The metamodel property the column maps to
+     * @param value The property value, or list of values
      * @returns The formatted value string
      */
-    private formatCsvValue(rawValue: string, property: PropertyType): string {
-        const value = rawValue.trim();
-        const propertyType = property.type as
-            | { name?: string; enum?: { ref?: { name?: string }; $refText?: string } }
-            | undefined;
-
-        const enumName =
-            (propertyType?.enum?.ref as { name?: string } | undefined)?.name ??
-            (propertyType?.enum != undefined ? parseIdentifier(propertyType.enum.$refText ?? "?") : undefined);
-        if (enumName != undefined) {
-            const serializer = this.modelState.languageServices.AstSerializer;
-            return `${serializer.serializePrimitive({ value: enumName }, ID)}.${serializer.serializePrimitive({ value }, ID)}`;
+    private formatContributedValue(value: ModelDataPropertyValue | ModelDataPropertyValue[]): string {
+        if (Array.isArray(value)) {
+            return `[${value.map((v) => this.formatContributedSingleValue(v)).join(", ")}]`;
         }
+        return this.formatContributedSingleValue(value);
+    }
 
-        switch (propertyType?.name) {
-            case "int":
-            case "long": {
-                const parsed = parseInt(value, 10);
-                return isNaN(parsed) ? `"${value}"` : String(parsed);
-            }
-            case "double":
-            case "float": {
-                const parsed = parseFloat(value);
-                return isNaN(parsed) ? `"${value}"` : String(parsed);
-            }
-            case "boolean":
-                return String(value.toLowerCase() === "true");
-            default:
-                return `"${value}"`;
+    /**
+     * Formats a single value a contribution plugin computed.
+     *
+     * @param value The single value
+     * @returns The formatted string
+     */
+    private formatContributedSingleValue(value: ModelDataPropertyValue): string {
+        if (value === null) {
+            return "null";
         }
+        if (typeof value === "string") {
+            return `"${value}"`;
+        }
+        if (typeof value === "number" || typeof value === "boolean") {
+            return String(value);
+        }
+        if (typeof value === "object" && "enum" in value) {
+            return value.enum;
+        }
+        return "?";
     }
 }
