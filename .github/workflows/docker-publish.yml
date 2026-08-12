@@ -47,6 +47,12 @@ jobs:
           - name: service-config-mdeo
             dockerfile: infra/docker/service-config-mdeo/Dockerfile
             version_arg: true
+          - name: service-csv
+            dockerfile: infra/docker/service-csv/Dockerfile
+            version_arg: true
+          - name: service-model-csv
+            dockerfile: infra/docker/service-model-csv/Dockerfile
+            version_arg: true
           - name: script-execution
             dockerfile: infra/docker/script-execution/Dockerfile
           - name: model-transformation-execution
@@ -162,6 +168,12 @@ jobs:
           - name: service-config-mdeo
             dockerfile: infra/docker/service-config-mdeo/Dockerfile
             version_arg: true
+          - name: service-csv
+            dockerfile: infra/docker/service-csv/Dockerfile
+            version_arg: true
+          - name: service-model-csv
+            dockerfile: infra/docker/service-model-csv/Dockerfile
+            version_arg: true
           - name: script-execution
             dockerfile: infra/docker/script-execution/Dockerfile
           - name: model-transformation-execution
@@ -246,6 +258,8 @@ jobs:
           - name: service-config
           - name: service-config-optimization
           - name: service-config-mdeo
+          - name: service-csv
+          - name: service-model-csv
           - name: script-execution
           - name: model-transformation-execution
           - name: optimizer-execution

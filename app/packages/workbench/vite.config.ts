@@ -30,7 +30,7 @@ export default defineConfig({
         // Matched by prefix in declaration order, so a longer path has to come
         // before any shorter path it starts with: model-transformation and
         // model-csv before model, config-optimization and config-mdeo before
-        // config, and plain csv last.
+        // config.
         proxy: {
             "/plugin/model-transformation": {
                 target: "http://localhost:3003",

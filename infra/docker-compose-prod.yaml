@@ -77,7 +77,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       PLUGIN_BASE_URL: ${PLUGIN_BASE_URL}
       INTERNAL_PLUGIN_BASE_URL: ${INTERNAL_PLUGIN_BASE_URL:-http://workbench:80}
-      DEFAULT_PLUGIN_URLS: ${DEFAULT_PLUGIN_URLS:-http://service-metamodel:3000,http://service-model:3000,http://service-script:3000,http://service-model-transformation:3000,http://service-config:3000,http://service-config-optimization:3000,http://service-config-mdeo:3000}
+      DEFAULT_PLUGIN_URLS: ${DEFAULT_PLUGIN_URLS:-http://service-metamodel:3000,http://service-model:3000,http://service-script:3000,http://service-model-transformation:3000,http://service-config:3000,http://service-config-optimization:3000,http://service-config-mdeo:3000,http://service-csv:3000,http://service-model-csv:3000}
     depends_on:
       postgres-backend:
         condition: service_healthy
@@ -95,6 +95,8 @@ services:
       PLUGIN_CONFIG_SERVICE: ${PLUGIN_CONFIG_SERVICE:-http://service-config:3000}
       PLUGIN_CONFIG_OPTIMIZATION_SERVICE: ${PLUGIN_CONFIG_OPTIMIZATION_SERVICE:-http://service-config-optimization:3000}
       PLUGIN_CONFIG_MDEO_SERVICE: ${PLUGIN_CONFIG_MDEO_SERVICE:-http://service-config-mdeo:3000}
+      PLUGIN_CSV_SERVICE: ${PLUGIN_CSV_SERVICE:-http://service-csv:3000}
+      PLUGIN_MODEL_CSV_SERVICE: ${PLUGIN_MODEL_CSV_SERVICE:-http://service-model-csv:3000}
       BACKEND_SERVICE: ${BACKEND_SERVICE:-http://backend:8080}
     ports:
       - "80:80"
@@ -112,6 +114,10 @@ services:
       service-config-optimization:
         condition: service_healthy
       service-config-mdeo:
+        condition: service_healthy
+      service-csv:
+        condition: service_healthy
+      service-model-csv:
         condition: service_healthy
     restart: unless-stopped
 
@@ -132,6 +138,36 @@ services:
 
   service-model:
     image: ${MDEO_IMAGE_PREFIX:-ghcr.io/mde-optimiser}/mdeo-service-model:${MDEO_IMAGE_TAG:-latest}
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      BACKEND_API_URL: "http://backend:8080/api"
+      MAX_LANGIUM_INSTANCES: "5"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  service-csv:
+    image: ${MDEO_IMAGE_PREFIX:-ghcr.io/mde-optimiser}/mdeo-service-csv:${MDEO_IMAGE_TAG:-latest}
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      BACKEND_API_URL: "http://backend:8080/api"
+      MAX_LANGIUM_INSTANCES: "5"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  service-model-csv:
+    image: ${MDEO_IMAGE_PREFIX:-ghcr.io/mde-optimiser}/mdeo-service-model-csv:${MDEO_IMAGE_TAG:-latest}
     environment:
       PORT: "3000"
       HOST: "0.0.0.0"
