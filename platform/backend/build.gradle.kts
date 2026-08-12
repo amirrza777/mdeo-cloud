@@ -64,3 +64,7 @@ tasks.shadowJar {
     archiveVersion.set("")
     mergeServiceFiles()
 }
+
+tasks.test {
+    useJUnitPlatform()
+}

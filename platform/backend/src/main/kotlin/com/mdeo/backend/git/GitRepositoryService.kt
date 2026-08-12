@@ -7,11 +7,6 @@ import com.mdeo.common.model.ApiResult
 import com.mdeo.common.model.FileType
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonPrimitive
 import org.eclipse.jgit.dircache.DirCache
 import org.eclipse.jgit.dircache.DirCacheEntry
 import org.eclipse.jgit.lib.CommitBuilder
@@ -263,11 +258,8 @@ class GitRepositoryService(
                 // push", so a client that never touched .mdeo/plugins.json
                 // cannot silently clear every plugin a project has enabled.
                 if (pushedPlugins != null) {
-                    val urls = try {
-                        Json.parseToJsonElement(String(pushedPlugins)).jsonArray.map { it.jsonPrimitive.content }
-                    } catch (e: Exception) {
-                        throw GitPushRejected("could not read $pluginsPath: ${e.message}")
-                    }
+                    val urls = GitPluginsFile.parse(pushedPlugins)
+                        ?: throw GitPushRejected("could not read $pluginsPath: not a JSON array of urls")
                     val unknown = pluginService.setProjectPlugins(projectId, urls)
                     if (unknown.isNotEmpty()) {
                         logger.info(
@@ -305,28 +297,11 @@ class GitRepositoryService(
     private fun pluginsFileContent(repository: PostgresDfsRepository, currentHead: ObjectId?, projectId: UUID): ByteArray {
         val urls = pluginService.getProjectPluginUrls(projectId)
         val existing = currentHead?.let { readPathAt(repository, it, pluginsPath) }
-        if (existing != null && parsePluginUrls(existing) == urls) {
+        if (existing != null && GitPluginsFile.describes(existing, urls)) {
             return existing
         }
-        val json = buildJsonArray { urls.forEach { add(JsonPrimitive(it)) } }
-        return json.toString().toByteArray()
+        return GitPluginsFile.serialize(urls)
     }
-
-    /**
-     * Parses [pluginsPath]'s content into a sorted list of urls, matching how
-     * [com.mdeo.backend.service.PluginService.getProjectPluginUrls] orders
-     * them, so the two can be compared regardless of how a client formatted
-     * or ordered the pushed array.
-     *
-     * @param content The file's raw bytes
-     * @return The urls it lists, sorted, or null if it does not parse
-     */
-    private fun parsePluginUrls(content: ByteArray): List<String>? =
-        try {
-            Json.parseToJsonElement(String(content)).jsonArray.map { it.jsonPrimitive.content }.sorted()
-        } catch (_: Exception) {
-            null
-        }
 
     /**
      * Reads one file's bytes out of the tree a commit points at.
