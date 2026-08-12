@@ -271,6 +271,31 @@ function createImportWrapper(
 }
 
 /**
+ * Finds which resolved import a model import node belongs to, matching by
+ * its wrapper `$type`.
+ *
+ * This is the single place that answers "which plugin owns this import
+ * node", so every consumer (diagram rendering, metadata persistence, data
+ * computation) agrees on the same answer instead of each re-deriving it.
+ *
+ * @param imports The resolved imports, as exposed by the `contributions.Imports` service
+ * @param node A model import node (an element of `Model.imports`)
+ * @returns The import's naming info, or undefined if the node isn't a resolved import
+ */
+export function pluginForImport(imports: Map<string, ImportNamingInfo>, node: unknown): ImportNamingInfo | undefined {
+    const wrapperType = (node as { $type?: string } | undefined)?.$type;
+    if (wrapperType == undefined) {
+        return undefined;
+    }
+    for (const namingInfo of imports.values()) {
+        if (namingInfo.interface.name === wrapperType) {
+            return namingInfo;
+        }
+    }
+    return undefined;
+}
+
+/**
  * Returns the wrapper interface name for a given import keyword.
  *
  * @param importName The import keyword (e.g. "CSV")

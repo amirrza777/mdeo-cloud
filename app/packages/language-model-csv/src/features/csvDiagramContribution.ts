@@ -2,10 +2,15 @@ import type { AstNode } from "langium";
 import { AstUtils } from "langium";
 import type { ExtendedLangiumServices } from "@mdeo/language-common";
 import { resolveRelativePath } from "@mdeo/language-shared";
-import { resolveClassChain, type ClassType, type PropertyType } from "@mdeo/language-metamodel";
-import type { ModelDiagramContributionData, ModelDiagramContributionServices } from "@mdeo/language-model";
+import type { ClassType } from "@mdeo/language-metamodel";
+import {
+    resolveMetamodelClassInfo,
+    type MetamodelClassInfo,
+    type ModelDiagramContributionData,
+    type ModelDiagramContributionServices
+} from "@mdeo/language-model";
 import type { CsvImportBlockType } from "../grammar/csvImportTypes.js";
-import { importCsvEntries, type CsvImportEntry, type MetamodelClassInfo, type MetamodelPropertyInfo } from "./csvImport.js";
+import { importCsvEntries, type CsvImportEntry } from "./csvImport.js";
 
 /**
  * Computes diagram nodes for the CSV import contribution.
@@ -27,6 +32,7 @@ export class CsvDiagramContribution implements ModelDiagramContributionServices 
 
         const entries: CsvImportEntry[] = [];
         const metamodelClasses: MetamodelClassInfo[] = [];
+        const classHierarchyByName = new Map<string, string[]>();
         const seenClasses = new Set<string>();
 
         for (const entry of content.imports ?? []) {
@@ -37,7 +43,9 @@ export class CsvDiagramContribution implements ModelDiagramContributionServices 
 
             if (!seenClasses.has(classRef.name)) {
                 seenClasses.add(classRef.name);
-                metamodelClasses.push(this.toMetamodelClassInfo(classRef));
+                const classInfo = resolveMetamodelClassInfo(classRef, this.services.shared.AstReflection);
+                metamodelClasses.push(classInfo);
+                classHierarchyByName.set(classRef.name, classInfo.classHierarchy ?? []);
             }
 
             try {
@@ -59,63 +67,10 @@ export class CsvDiagramContribution implements ModelDiagramContributionServices 
         }
 
         const { instances, links } = importCsvEntries(entries, metamodelClasses);
-        return { instances, links };
-    }
-
-    /**
-     * Converts a resolved class (and its extended classes) into the plain
-     * metamodel description {@link importCsvEntries} maps CSV columns
-     * against, flattening inherited properties the same way column
-     * resolution already treated them.
-     *
-     * Only plain attributes are included, matching this plugin's existing
-     * scope: reference/association-end properties are not resolved here, so
-     * a CSV import does not (yet) produce links, the same as before this was
-     * moved out of `language-model`.
-     *
-     * @param classType The imported class, already resolved
-     * @returns The class described in the shape `importCsvEntries` expects
-     */
-    private toMetamodelClassInfo(classType: ClassType): MetamodelClassInfo {
-        const chain = resolveClassChain(classType, this.services.shared.AstReflection);
-
-        const seen = new Set<string>();
-        const properties: MetamodelPropertyInfo[] = [];
-        for (const cls of chain) {
-            for (const property of cls.properties ?? []) {
-                if (property?.name != undefined && !seen.has(property.name)) {
-                    seen.add(property.name);
-                    properties.push(this.toMetamodelPropertyInfo(property));
-                }
-            }
-        }
-
-        return { name: classType.name, properties };
-    }
-
-    /**
-     * Converts one resolved property into the plain shape
-     * {@link importCsvEntries} expects.
-     *
-     * @param property The property, already resolved
-     * @returns The property described generically
-     */
-    private toMetamodelPropertyInfo(property: PropertyType): MetamodelPropertyInfo {
-        const type = property.type as
-            | { name?: string; enum?: { ref?: { name?: string; entries?: { name: string }[] } } }
-            | undefined;
-
-        if (type?.enum != undefined) {
-            return {
-                name: property.name,
-                type: "enum",
-                enumEntries: type.enum.ref?.entries?.map((entry) => entry.name) ?? []
-            };
-        }
-
-        return {
-            name: property.name,
-            type: (type?.name as MetamodelPropertyInfo["type"] | undefined) ?? "string"
-        };
+        const instancesWithHierarchy = instances.map((instance) => ({
+            ...instance,
+            classHierarchy: classHierarchyByName.get(instance.className)
+        }));
+        return { instances: instancesWithHierarchy, links };
     }
 }

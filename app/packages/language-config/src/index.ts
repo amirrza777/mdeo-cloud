@@ -5,7 +5,6 @@ export * from "./features/configDelegatingCompletionProvider.js";
 export * from "./features/configDelegatingExternalReferenceCollector.js";
 export * from "./features/configDelegatingScopeProvider.js";
 export * from "./features/configSerializers.js";
-export * from "./features/util.js";
 export * from "./grammar/configRules.js";
 export * from "./grammar/configTypes.js";
 export * from "./plugin/configContributionPlugin.js";

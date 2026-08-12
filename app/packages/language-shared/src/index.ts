@@ -79,7 +79,6 @@ export * from "./serialization/comments.js";
 export * from "./serialization/defaultTokenSerializers.js";
 export * from "./serialization/indentationGuesser.js";
 export * from "./serialization/newlineSepSerializer.js";
-export * from "./util/csv.js";
 export * from "./util/pathUtils.js";
 export * from "./workspace/workspaceEditService.js";
 export * from "./sharedImport.js";

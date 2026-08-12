@@ -1,5 +1,13 @@
-import type { ModelData, ModelDataInstance, ModelDataPropertyValue } from "@mdeo/language-model";
-import { parseCsv } from "@mdeo/language-shared";
+import type {
+    ModelData,
+    ModelDataInstance,
+    ModelDataPropertyValue,
+    MetamodelClassInfo,
+    MetamodelPropertyInfo
+} from "@mdeo/language-model";
+import { parseCsv } from "./csv.js";
+
+export type { MetamodelClassInfo, MetamodelPropertyInfo };
 
 export interface CsvColumnMappingEntry {
     csvColumn: string;
@@ -198,19 +206,6 @@ function resolveColumnMapping(
         warnings.push(`CSV for '${entry.className}' has unknown columns: ${unknownCols.join(", ")} — they will be ignored.`);
     }
     return columnToProperty;
-}
-
-export interface MetamodelPropertyInfo {
-    name: string;
-    type: "string" | "int" | "long" | "double" | "float" | "boolean" | "enum" | "reference";
-    enumEntries?: string[];
-    isReference?: boolean;
-    referencedClass?: string;
-}
-
-export interface MetamodelClassInfo {
-    name: string;
-    properties: MetamodelPropertyInfo[];
 }
 
 function convertCellValue(rawValue: string, prop: MetamodelPropertyInfo): ModelDataPropertyValue {

@@ -11,7 +11,7 @@ import {
 } from "@mdeo/language-shared";
 import type { ModelIdRegistry, GraphMetadata } from "@mdeo/language-shared";
 import type { NodeLayoutMetadata, EdgeLayoutMetadata } from "@mdeo/protocol-common";
-import { ID } from "@mdeo/language-common";
+import { ID, getServicesByLanguageId } from "@mdeo/language-common";
 import { resolveClassChain, type ClassType } from "@mdeo/language-metamodel";
 import type {
     PartialModel,
@@ -41,6 +41,7 @@ import type {
     ModelDiagramContributionServices
 } from "../../plugin/modelDiagramContribution.js";
 import type { ModelServices } from "../../modelPlugin.js";
+import { pluginForImport } from "../../plugin/resolvePlugins.js";
 
 const { injectable } = sharedImport("inversify");
 const { GGraph } = sharedImport("@eclipse-glsp/server");
@@ -506,26 +507,17 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
             return;
         }
 
-        const languageKeyByWrapperType = new Map<string, string>();
-        for (const namingInfo of contributionImports.values()) {
-            languageKeyByWrapperType.set(namingInfo.interface.name, namingInfo.plugin.languageKey);
-        }
-
         const registry = this.modelState.languageServices.shared.ServiceRegistry;
         const validatedMetadata = await this.modelState.getValidatedMetadata();
 
         for (const imp of model.imports) {
-            const wrapperType = (imp as { $type?: string } | undefined)?.$type;
             const content = (imp as { content?: AstNode } | undefined)?.content;
-            if (wrapperType == undefined || content == undefined) {
+            const namingInfo = pluginForImport(contributionImports, imp);
+            if (content == undefined || namingInfo == undefined) {
                 continue;
             }
 
-            const languageKey = languageKeyByWrapperType.get(wrapperType);
-            if (languageKey == undefined) {
-                continue;
-            }
-
+            const languageKey = namingInfo.plugin.languageKey;
             const contribution = this.getDiagramContribution(registry, languageKey);
             if (contribution == undefined) {
                 continue;
@@ -546,19 +538,12 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
      * the same shared registry every plugin's language services are
      * registered in.
      *
-     * Langium's `ServiceRegistry` only exposes lookup by file extension or
-     * URI publicly. Every plugin's services are also indexed by language id
-     * internally (a language key is exactly that id), which is what this
-     * reaches into instead, the same way `language-config`'s
-     * `getServicesByLanguageId` does.
-     *
      * @param registry The shared Langium service registry
      * @param languageKey The contributing plugin's language key
      * @returns The plugin's diagram contribution service, if it provides one
      */
     private getDiagramContribution(registry: ServiceRegistry, languageKey: string): ModelDiagramContributionServices | undefined {
-        // @ts-expect-error - accessing a protected property to look services up by language id
-        const services = registry.languageIdMap.get(languageKey) as ModelDiagramContributionAdditionalServices | undefined;
+        const services = getServicesByLanguageId(registry, languageKey) as ModelDiagramContributionAdditionalServices | undefined;
         return services?.diagram?.Contribution;
     }
 
@@ -594,6 +579,7 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
                 .id(nodeId)
                 .name(instance.name)
                 .typeName(instance.className)
+                .classHierarchy(instance.classHierarchy ?? [])
                 .meta(metadata)
                 .build();
 

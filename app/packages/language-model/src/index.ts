@@ -53,6 +53,7 @@ export * from "./validation/baseModelValidator.js";
 export * from "./validation/modelValidator.js";
 export * from "./generatedModelPlugin.js";
 export * from "./modelPlugin.js";
+export * from "./plugin/metamodelClassInfo.js";
 export * from "./plugin/modelContributionPlugin.js";
 export * from "./plugin/modelDiagramContribution.js";
 export * from "./plugin/resolvePlugins.js";

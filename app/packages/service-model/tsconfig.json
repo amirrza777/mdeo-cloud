@@ -9,6 +9,9 @@
             "path": "../language-common"
         },
         {
+            "path": "../language-metamodel"
+        },
+        {
             "path": "../language-shared"
         },
         {

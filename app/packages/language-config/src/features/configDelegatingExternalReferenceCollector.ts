@@ -6,7 +6,7 @@ import type {
 } from "@mdeo/language-common";
 import type { LangiumDocument, URI } from "langium";
 import type { ResolvedConfigContributionPlugins } from "../plugin/resolvePlugins.js";
-import { getServicesByLanguageId } from "./util.js";
+import { getServicesByLanguageId } from "@mdeo/language-common";
 
 /**
  * A delegating external reference collector for the config language.

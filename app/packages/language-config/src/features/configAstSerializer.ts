@@ -2,23 +2,8 @@ import type { LangiumCoreServices, ServiceRegistry } from "langium";
 import { DefaultAstSerializer } from "@mdeo/language-shared";
 import type { ConfigContributionPlugin } from "../plugin/configContributionPlugin.js";
 import type { AstSerializer, PrimitiveValue, PrintContext } from "@mdeo/language-common";
+import { getServicesByLanguageId } from "@mdeo/language-common";
 import type { Doc } from "prettier";
-
-/**
- * Gets language services by language ID from the Langium ServiceRegistry.
- *
- * @param registry The Langium service registry
- * @param languageId The language ID to find
- * @returns The language services, or undefined if not found
- */
-function getServicesByLanguageId(registry: ServiceRegistry, languageId: string): LangiumCoreServices | undefined {
-    for (const services of registry.all) {
-        if (services.LanguageMetaData.languageId === languageId) {
-            return services;
-        }
-    }
-    return undefined;
-}
 
 /**
  * AST serializer for the config language that delegates section serialization to plugin serializers.

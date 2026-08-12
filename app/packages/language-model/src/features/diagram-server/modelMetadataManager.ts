@@ -14,6 +14,7 @@ import {
 import { ModelElementType } from "@mdeo/protocol-model";
 import type { PartialModel, PartialObjectInstance, PartialLink } from "../../grammar/modelPartialTypes.js";
 import type { ModelServices } from "../../modelPlugin.js";
+import { pluginForImport } from "../../plugin/resolvePlugins.js";
 
 const { injectable, inject } = sharedImport("inversify");
 
@@ -109,16 +110,10 @@ export class ModelMetadataManager extends MetadataManager<PartialModel> {
         const contributionImports = (this.languageServices as unknown as ModelServices).contributions.Imports;
         if (contributionImports.size === 0) return;
 
-        const wrapperTypeToLanguageKey = new Map<string, string>();
-        for (const namingInfo of contributionImports.values()) {
-            wrapperTypeToLanguageKey.set(namingInfo.interface.name, namingInfo.plugin.languageKey);
-        }
-
         const languageKeys = new Set<string>();
         for (const imp of sourceModel.imports) {
-            const wrapperType = (imp as { $type?: string } | undefined)?.$type;
-            const languageKey = wrapperType != undefined ? wrapperTypeToLanguageKey.get(wrapperType) : undefined;
-            if (languageKey != undefined) languageKeys.add(languageKey);
+            const namingInfo = pluginForImport(contributionImports, imp);
+            if (namingInfo != undefined) languageKeys.add(namingInfo.plugin.languageKey);
         }
         if (languageKeys.size === 0) return;
 
