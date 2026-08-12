@@ -13,7 +13,7 @@ import {
 } from "@mdeo/language-shared";
 import { ModelElementType } from "@mdeo/protocol-model";
 import type { PartialModel, PartialObjectInstance, PartialLink } from "../../grammar/modelPartialTypes.js";
-import { getWrapperInterfaceName } from "../../plugin/resolvePlugins.js";
+import type { ModelServices } from "../../modelPlugin.js";
 
 const { injectable, inject } = sharedImport("inversify");
 
@@ -64,7 +64,7 @@ export class ModelMetadataManager extends MetadataManager<PartialModel> {
 
         this.extractObjectMetadata(objects, idRegistry, nodes);
         this.extractLinkMetadata(links, idRegistry, edges, nodes);
-        this.extractCsvNodeMetadata(sourceModel, nodes);
+        this.extractContributedNodeMetadata(sourceModel, nodes);
 
         return { nodes, edges };
     }
@@ -72,10 +72,10 @@ export class ModelMetadataManager extends MetadataManager<PartialModel> {
     /**
      * The metadata being validated by the current {@link validateMetadata} call.
      *
-     * CSV node metadata has to be carried forward from the incoming metadata
-     * rather than derived from the model, but `extractGraphMetadata` only
-     * receives the source model, so this passes it down. It is scoped to a
-     * single call: it is restored in a `finally` block, so a nested or
+     * Contributed node metadata has to be carried forward from the incoming
+     * metadata rather than derived from the model, but `extractGraphMetadata`
+     * only receives the source model, so this passes it down. It is scoped
+     * to a single call: it is restored in a `finally` block, so a nested or
      * concurrent validation cannot see another document's metadata.
      */
     private storedCurrentMetadata: GraphMetadata | undefined;
@@ -94,14 +94,37 @@ export class ModelMetadataManager extends MetadataManager<PartialModel> {
         }
     }
 
-    private extractCsvNodeMetadata(sourceModel: PartialModel, nodes: Record<string, NodeMetadata>): void {
-        const hasCsvImport = sourceModel.imports?.some(
-            (imp) => (imp as { $type?: string }).$type === getWrapperInterfaceName("CSV")
-        );
-        if (!hasCsvImport) return;
-        if (this.storedCurrentMetadata == undefined) return;
+    /**
+     * Carries forward layout metadata for nodes a contribution plugin
+     * rendered (ids `imported-<languageKey>-<name>`), since those nodes have
+     * no backing AST for {@link extractObjectMetadata} to find them by.
+     *
+     * Only carried forward for language keys actually referenced by one of
+     * the model's imports, so removing an import lets its nodes' stale
+     * metadata be cleaned up rather than kept forever.
+     */
+    private extractContributedNodeMetadata(sourceModel: PartialModel, nodes: Record<string, NodeMetadata>): void {
+        if (this.storedCurrentMetadata == undefined || sourceModel.imports == undefined) return;
+
+        const contributionImports = (this.languageServices as unknown as ModelServices).contributions.Imports;
+        if (contributionImports.size === 0) return;
+
+        const wrapperTypeToLanguageKey = new Map<string, string>();
+        for (const namingInfo of contributionImports.values()) {
+            wrapperTypeToLanguageKey.set(namingInfo.interface.name, namingInfo.plugin.languageKey);
+        }
+
+        const languageKeys = new Set<string>();
+        for (const imp of sourceModel.imports) {
+            const wrapperType = (imp as { $type?: string } | undefined)?.$type;
+            const languageKey = wrapperType != undefined ? wrapperTypeToLanguageKey.get(wrapperType) : undefined;
+            if (languageKey != undefined) languageKeys.add(languageKey);
+        }
+        if (languageKeys.size === 0) return;
+
+        const prefixes = [...languageKeys].map((key) => `imported-${key}-`);
         for (const [id, meta] of Object.entries(this.storedCurrentMetadata.nodes)) {
-            if (id.startsWith("csv-node-") && !nodes[id]) {
+            if (!nodes[id] && prefixes.some((prefix) => id.startsWith(prefix))) {
                 nodes[id] = meta;
             }
         }
