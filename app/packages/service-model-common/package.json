@@ -1,16 +1,27 @@
 {
     "name": "@mdeo/service-model-common",
-    "version": "0.1.0",
+    "version": "0.2.11",
+    "license": "EPL-2.0",
     "type": "module",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/mde-optimiser/mdeo-cloud.git",
+        "directory": "app/packages/service-model-common"
+    },
+    "publishConfig": {
+        "access": "public"
+    },
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "files": [
         "dist",
-        "src"
+        "src",
+        "LICENSE",
+        "LICENSES"
     ],
     "dependencies": {
-        "@mdeo/language-model": "^0.1.0",
-        "@mdeo/service-common": "^0.1.0"
+        "@mdeo/language-model": "^0.2.11",
+        "@mdeo/service-common": "^0.2.11"
     },
     "devDependencies": {
         "@types/node": "^25.3.1",

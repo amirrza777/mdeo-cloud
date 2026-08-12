@@ -1,13 +1,21 @@
 {
     "name": "@mdeo/service-model-csv",
-    "version": "0.1.0",
+    "version": "0.2.11",
     "private": true,
+    "license": "EPL-2.0",
     "type": "module",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/mde-optimiser/mdeo-cloud.git",
+        "directory": "app/packages/service-model-csv"
+    },
     "main": "dist/index.js",
     "types": "dist/index.d.ts",
     "files": [
         "dist",
-        "src"
+        "src",
+        "LICENSE",
+        "LICENSES"
     ],
     "scripts": {
         "build:static": "vite build",
@@ -16,13 +24,13 @@
         "watch": "tsx watch src/index.ts"
     },
     "dependencies": {
-        "@mdeo/language-common": "^0.1.0",
-        "@mdeo/language-model": "^0.1.0",
-        "@mdeo/language-model-csv": "^0.1.0",
-        "@mdeo/language-shared": "^0.1.0",
-        "@mdeo/plugin": "^0.1.0",
-        "@mdeo/service-common": "^0.1.0",
-        "@mdeo/service-model-common": "^0.1.0",
+        "@mdeo/language-common": "^0.2.11",
+        "@mdeo/language-model": "^0.2.11",
+        "@mdeo/language-model-csv": "^0.2.11",
+        "@mdeo/language-shared": "^0.2.11",
+        "@mdeo/plugin": "^0.2.11",
+        "@mdeo/service-common": "^0.2.11",
+        "@mdeo/service-model-common": "^0.2.11",
         "lucide": "^1.29.0"
     },
     "devDependencies": {
