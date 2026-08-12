@@ -67,6 +67,12 @@ export async function uploadFiles(
         // file.name comes from outside the application, so it is reduced to
         // a base name before joining, rather than trusted as one path segment.
         const name = getFileBaseName(file.name);
+        if (name == undefined) {
+            showError(`Could not upload "${file.name}"`, {
+                description: "This is not a usable file name."
+            });
+            continue;
+        }
         const uri = Uri.joinPath(targetFolderUri, name);
         try {
             const text = await file.text();

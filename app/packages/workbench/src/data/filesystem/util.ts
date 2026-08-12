@@ -54,10 +54,20 @@ export function getFileExtension(filePath: string): string {
  * before joining a `File`'s name onto a target URI, so an upload can only
  * ever land directly inside the folder it was dropped on.
  *
+ * A trailing separator, or a name that is entirely separators, is reduced by
+ * ignoring empty segments rather than returning one. A final segment of `.`
+ * or `..` is rejected outright rather than passed through: unlike an
+ * embedded one (`../../etc/passwd` safely reduces to `passwd`, the same as
+ * any other path), a *trailing* `.`/`..` is exactly the target `Uri.joinPath`
+ * would resolve relative to the current or parent folder, which is the one
+ * case this function exists to rule out.
+ *
  * @param name The name to reduce to a base name
- * @returns The final path segment, with both separators considered
+ * @returns The final path segment, or undefined if none remains once `.`,
+ *   `..` and empty segments are excluded
  */
-export function getFileBaseName(name: string): string {
-    const segments = name.split(/[/\\]/);
-    return segments[segments.length - 1] ?? name;
+export function getFileBaseName(name: string): string | undefined {
+    const segments = name.split(/[/\\]/).filter((segment) => segment.length > 0);
+    const base = segments[segments.length - 1];
+    return base == undefined || base === "." || base === ".." ? undefined : base;
 }
