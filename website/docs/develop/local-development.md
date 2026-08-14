@@ -15,16 +15,21 @@ Builds every image from the checkout and exposes the internal ports:
 | --- | --- |
 | 4242 | Workbench |
 | 8080 | Backend API |
-| 3001 | `service-metamodel` |
-| 3002 | `service-model` |
-| 3003 | `service-script` |
-| 3004 | `service-model-transformation` |
-| 3005 | `service-config` |
-| 3006 | `service-config-optimization` |
+| 3000 | `service-metamodel` |
+| 3001 | `service-model` |
+| 3002 | `service-script` |
+| 3003 | `service-model-transformation` |
+| 3004 | `service-config` |
+| 3005 | `service-config-optimization` |
+| 3006 | `service-config-mdeo` |
 | 3007 | `service-model-csv` |
-| 3008 | `service-config-mdeo` |
-| — | `service-csv`, reachable only from inside the compose network |
+| 3008 | `service-csv` |
 | 5432–5435 | PostgreSQL (backend, script, model-transformation, optimizer) |
+
+These are the same ports the workbench's Vite proxy expects, so the two setups below line up: you
+can leave the plugin services running in Docker and start only `npm run dev` on the host, and the
+dev server reaches the containers without further configuration. Running a host copy of a service
+that is also up in Docker fails on the port instead of quietly shadowing it.
 
 Three `optimizer-execution` nodes are started and wired as peers, so distributed search can be
 exercised locally.
@@ -72,8 +77,13 @@ without further configuration:
 | `/plugin/csv` | `http://localhost:3008` |
 | `/api` | `http://localhost:8080` |
 
-Set `PORT` accordingly when starting each service. Adding a new plugin means adding a proxy entry —
-see the end of [Add a plugin](/develop/add-a-plugin).
+Set `PORT` accordingly when starting each service — or start that service from
+`infra/docker-compose-dev.yaml` instead, which publishes it on the same port. Adding a new plugin
+means adding a proxy entry — see the end of [Add a plugin](/develop/add-a-plugin).
+
+Proxy paths are matched by prefix in declaration order, so a longer path has to be declared before
+any shorter path it starts with: `/plugin/model-transformation` and `/plugin/model-csv` before
+`/plugin/model`, `/plugin/config-optimization` and `/plugin/config-mdeo` before `/plugin/config`.
 
 The proxy also injects the `Cross-Origin-Opener-Policy` and `Cross-Origin-Embedder-Policy` headers the
 workbench needs, which is why plugin services should be reached through it rather than directly.

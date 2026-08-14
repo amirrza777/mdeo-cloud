@@ -1,5 +1,6 @@
 import type { ValidationAcceptor, ValidationChecks, AstNode } from "langium";
 import type { ExtendedLangiumServices } from "@mdeo/language-common";
+import { getServicesByLanguageId } from "@mdeo/language-common";
 import {
     EnumTypeReference,
     MetaModel,
@@ -23,10 +24,18 @@ import {
     type PropertyAssignmentType,
     type SimpleValueType,
     type EnumValueType,
-    type ListValueType
+    type ListValueType,
+    type BaseModelImportType
 } from "../grammar/modelTypes.js";
 import { BaseModelValidator } from "./baseModelValidator.js";
-import { climbsAboveProjectRoot, resolveRelativeDocument, sharedImport } from "@mdeo/language-shared";
+import {
+    climbsAboveProjectRoot,
+    resolveRelativeDocument,
+    runContributedValidations,
+    sharedImport
+} from "@mdeo/language-shared";
+import { pluginForImport } from "../plugin/resolvePlugins.js";
+import type { ModelServices } from "../modelPlugin.js";
 
 const { MultiMap, AstUtils } = sharedImport("langium");
 
@@ -38,6 +47,7 @@ interface ModelAstTypes {
     ObjectInstance: ObjectInstanceType;
     PropertyAssignment: PropertyAssignmentType;
     Link: LinkType;
+    BaseModelImport: BaseModelImportType;
 }
 
 /**
@@ -53,7 +63,8 @@ export function registerModelValidationChecks(services: ExtendedLangiumServices)
         Model: validator.validateModel.bind(validator),
         ObjectInstance: validator.validateObjectInstance.bind(validator),
         PropertyAssignment: validator.validatePropertyAssignment.bind(validator),
-        Link: validator.validateLink.bind(validator)
+        Link: validator.validateLink.bind(validator),
+        BaseModelImport: validator.validateContributedImport.bind(validator)
     };
 
     registry.register(checks, validator);
@@ -65,6 +76,44 @@ export function registerModelValidationChecks(services: ExtendedLangiumServices)
 export class ModelValidator extends BaseModelValidator {
     constructor(private readonly services: ExtendedLangiumServices) {
         super(services.shared.AstReflection);
+    }
+
+    /**
+     * Delegates validation of a contributed data import to the plugin that
+     * contributed it.
+     *
+     * The import's content is parsed with the plugin's grammar but ends up in a
+     * model document, which is validated by the model language's registry —
+     * where the plugin's own checks are not registered. So the plugin's
+     * services are looked up and its checks are run over the block, exactly as
+     * `ConfigValidator` does for a contributed section. The model language
+     * still knows nothing about any particular import format; a plugin with no
+     * checks of its own simply contributes none.
+     *
+     * @param wrapper The import wrapper node
+     * @param accept The validation acceptor
+     */
+    validateContributedImport(wrapper: BaseModelImportType, accept: ValidationAcceptor): void {
+        const contributionImports = (this.services as unknown as ModelServices).contributions?.Imports;
+        if (contributionImports == undefined) {
+            return;
+        }
+
+        const namingInfo = pluginForImport(contributionImports, wrapper);
+        const content = (wrapper as AstNode & { content?: AstNode }).content;
+        if (namingInfo == undefined || content == undefined) {
+            return;
+        }
+
+        const pluginServices = getServicesByLanguageId(
+            this.services.shared.ServiceRegistry,
+            namingInfo.plugin.languageKey
+        );
+        if (pluginServices == undefined) {
+            return;
+        }
+
+        runContributedValidations(content, pluginServices.validation.ValidationRegistry, accept);
     }
 
     /**

@@ -80,5 +80,6 @@ export * from "./serialization/defaultTokenSerializers.js";
 export * from "./serialization/indentationGuesser.js";
 export * from "./serialization/newlineSepSerializer.js";
 export * from "./util/pathUtils.js";
+export * from "./validation/contributedValidations.js";
 export * from "./workspace/workspaceEditService.js";
 export * from "./sharedImport.js";

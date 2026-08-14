@@ -141,8 +141,12 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
         const classRef = obj.class;
         const typeName = classRef?.$refText ?? (classRef?.ref as { name?: string } | undefined)?.name ?? "Unknown";
         const resolvedClass = classRef?.ref as ClassType | undefined;
+        // Undefined rather than empty when the class does not resolve: the client
+        // reads an empty hierarchy as "matches nothing" and blocks every connection.
         const classHierarchy =
-            resolvedClass != undefined ? resolveClassChain(resolvedClass, this.reflection).map((c) => c.name) : [];
+            resolvedClass != undefined
+                ? resolveClassChain(resolvedClass, this.reflection).map((c) => c.name)
+                : undefined;
 
         const node = GObjectNode.builder()
             .id(nodeId)
@@ -542,8 +546,13 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
      * @param languageKey The contributing plugin's language key
      * @returns The plugin's diagram contribution service, if it provides one
      */
-    private getDiagramContribution(registry: ServiceRegistry, languageKey: string): ModelDiagramContributionServices | undefined {
-        const services = getServicesByLanguageId(registry, languageKey) as ModelDiagramContributionAdditionalServices | undefined;
+    private getDiagramContribution(
+        registry: ServiceRegistry,
+        languageKey: string
+    ): ModelDiagramContributionServices | undefined {
+        const services = getServicesByLanguageId(registry, languageKey) as
+            | ModelDiagramContributionAdditionalServices
+            | undefined;
         return services?.diagram?.Contribution;
     }
 
@@ -571,6 +580,14 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
         const nodeIdByInstanceName = new Map<string, string>();
 
         for (const instance of data.instances) {
+            // Names are the plugin's to choose and the contract does not promise
+            // they are unique, but ids and the link lookup below are both keyed
+            // by them. Keeping the first and skipping any repeat is what the
+            // links already assume, and beats emitting two nodes with one id.
+            if (nodeIdByInstanceName.has(instance.name)) {
+                continue;
+            }
+
             const nodeId = `imported-${languageKey}-${instance.name}`;
             nodeIdByInstanceName.set(instance.name, nodeId);
             const metadata = (validatedMetadata.nodes[nodeId]?.meta as NodeLayoutMetadata | undefined) ?? {};
@@ -579,7 +596,7 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
                 .id(nodeId)
                 .name(instance.name)
                 .typeName(instance.className)
-                .classHierarchy(instance.classHierarchy ?? [])
+                .classHierarchy(instance.classHierarchy)
                 .meta(metadata)
                 .build();
 
@@ -599,7 +616,8 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
 
             const edgeId = `imported-${languageKey}-link-${index}`;
             const metadata =
-                (validatedMetadata.edges[edgeId]?.meta as EdgeLayoutMetadata | undefined) ?? EdgeLayoutMetadataUtil.create();
+                (validatedMetadata.edges[edgeId]?.meta as EdgeLayoutMetadata | undefined) ??
+                EdgeLayoutMetadataUtil.create();
             const edgeBuilder = GLinkEdge.builder().id(edgeId).sourceId(sourceId).targetId(targetId).meta(metadata);
             if (link.sourceProperty != undefined) {
                 edgeBuilder.sourceProperty(link.sourceProperty);
@@ -612,10 +630,14 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
             // Matches createLinkEdge's convention below: a source property is
             // shown as a label near the target end, and vice versa.
             if (link.sourceProperty != undefined) {
-                edge.children.push(...this.createLinkEndNodes(edgeId, link.sourceProperty, "target", validatedMetadata));
+                edge.children.push(
+                    ...this.createLinkEndNodes(edgeId, link.sourceProperty, "target", validatedMetadata)
+                );
             }
             if (link.targetProperty != undefined) {
-                edge.children.push(...this.createLinkEndNodes(edgeId, link.targetProperty, "source", validatedMetadata));
+                edge.children.push(
+                    ...this.createLinkEndNodes(edgeId, link.targetProperty, "source", validatedMetadata)
+                );
             }
 
             graph.children.push(edge);

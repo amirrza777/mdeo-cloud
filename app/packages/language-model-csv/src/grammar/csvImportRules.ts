@@ -29,9 +29,7 @@ export const CsvClassImportRule = createRule("CsvClassImportRule")
         set("class", ref(ExternalClass, ID)),
         "from",
         set("file", STRING),
-        optional(
-            group("{", many(or(add("mappings", CsvColumnMappingRule), NEWLINE)), "}")
-        )
+        optional(group("{", many(or(add("mappings", CsvColumnMappingRule), NEWLINE)), "}"))
     ]);
 
 /**

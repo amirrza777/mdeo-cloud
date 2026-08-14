@@ -58,6 +58,10 @@ async function createEnvironment() {
         "language-model-transformation/dist/index.js"
     );
     const { scriptPluginProvider } = await importPackage("language-script/dist/index.js");
+    const { csvPluginProvider } = await importPackage("language-csv/dist/index.js");
+    const { modelCsvPluginProvider, createModelCsvContributionPlugin } = await importPackage(
+        "language-model-csv/dist/index.js"
+    );
     const { configPluginProvider } = await importPackage("language-config/dist/index.js");
     const { configOptimizationPluginProvider, createOptimizationContributionPlugin } = await importPackage(
         "language-config-optimization/dist/index.js"
@@ -72,8 +76,13 @@ async function createEnvironment() {
         "service-script/dist/scriptConfigContributionPlugin.js"
     );
 
+    // The import contributions the backend hands to the model service when all default
+    // plugins are enabled, so a sample's `import CSV` block is parsed the same way the
+    // workbench parses it.
+    const modelContributionPlugins = [createModelCsvContributionPlugin()];
+
     // Same set of contribution plugins the backend hands to the config service when all
-    // seven default plugins are enabled for a project.
+    // default plugins are enabled for a project.
     const configContributionPlugins = [
         createMetamodelConfigContributionPlugin(),
         createScriptConfigContributionPlugin(),
@@ -83,7 +92,14 @@ async function createEnvironment() {
 
     const definitions = [
         { id: "metamodel", extension: ".mm", provider: metamodelPluginProvider, contributionPlugins: [] },
-        { id: "model", extension: ".m", provider: modelPluginProvider, contributionPlugins: [] },
+        {
+            id: "model",
+            extension: ".m",
+            provider: modelPluginProvider,
+            contributionPlugins: modelContributionPlugins
+        },
+        { id: "csv", extension: ".csv", provider: csvPluginProvider, contributionPlugins: [] },
+        { id: "model-csv", extension: undefined, provider: modelCsvPluginProvider, contributionPlugins: [] },
         { id: "model_gen", extension: ".m_gen", provider: generatedModelPluginProvider, contributionPlugins: [] },
         {
             id: "model-transformation",
@@ -191,7 +207,7 @@ async function collectProjects() {
     return projects;
 }
 
-const KNOWN_EXTENSIONS = new Set([".mm", ".m", ".m_gen", ".mt", ".mt_gen", ".fn", ".config"]);
+const KNOWN_EXTENSIONS = new Set([".mm", ".m", ".m_gen", ".mt", ".mt_gen", ".fn", ".config", ".csv"]);
 
 const SEVERITY_LABELS = { 1: "error", 2: "warning", 3: "information", 4: "hint" };
 

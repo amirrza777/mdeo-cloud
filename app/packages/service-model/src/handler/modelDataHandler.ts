@@ -9,7 +9,12 @@ import {
 } from "@mdeo/language-model";
 import { Class, type ClassType } from "@mdeo/language-metamodel";
 import type { AstReflection } from "@mdeo/language-common";
-import type { MetamodelClassInfo, ModelPluginData, ModelPluginRequestBody, ModelPluginRequestResponse } from "@mdeo/service-model-common";
+import type {
+    MetamodelClassInfo,
+    ModelPluginData,
+    ModelPluginRequestBody,
+    ModelPluginRequestResponse
+} from "@mdeo/service-model-common";
 import { MODEL_PLUGIN_REQUEST_KEY } from "@mdeo/service-model-common";
 import { hasErrors, type FileDataHandler, type FileDependency, type DataDependency } from "@mdeo/service-common";
 import { resolveRelativePath } from "@mdeo/language-shared";

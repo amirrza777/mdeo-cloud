@@ -1,5 +1,11 @@
 import type { GetFileActionsParams, GetFileActionsResponse, ActionIconNode } from "@mdeo/language-common";
-import { convertIcon, FileCategory, parseUri, ActionDisplayLocation, getServicesByLanguageId } from "@mdeo/language-common";
+import {
+    convertIcon,
+    FileCategory,
+    parseUri,
+    ActionDisplayLocation,
+    getServicesByLanguageId
+} from "@mdeo/language-common";
 import type { LangiumCoreServices, LangiumSharedCoreServices, ServiceRegistry } from "langium";
 import { Play } from "lucide";
 import { sharedImport, type ActionProvider, type ActionHandlerRegistryAdditionalServices } from "@mdeo/language-shared";

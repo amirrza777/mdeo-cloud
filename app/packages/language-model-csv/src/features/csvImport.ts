@@ -37,10 +37,7 @@ export interface CsvImportResult {
  * Cross-object references use a reserved `_id` column as the row identifier,
  * with reference columns holding the target `_id` value.
  */
-export function importCsvEntries(
-    entries: CsvImportEntry[],
-    metamodelClasses: MetamodelClassInfo[]
-): CsvImportResult {
+export function importCsvEntries(entries: CsvImportEntry[], metamodelClasses: MetamodelClassInfo[]): CsvImportResult {
     const warnings: string[] = [];
     const allInstances: ModelDataInstance[] = [];
     const allLinks: ModelData["links"] = [];
@@ -59,7 +56,7 @@ export function importCsvEntries(
     const rowsPerClass = new Map<string, number>();
 
     for (const [entryIndex, entry] of entries.entries()) {
-        const classInfo = metamodelClasses.find(c => c.name === entry.className);
+        const classInfo = metamodelClasses.find((c) => c.name === entry.className);
         if (!classInfo) {
             warnings.push(`Class '${entry.className}' not found in metamodel — skipping.`);
             continue;
@@ -97,7 +94,7 @@ export function importCsvEntries(
                 if (colName === "_id") return;
                 const propName = columnToProperty.get(colName);
                 if (!propName) return;
-                const prop = classInfo.properties.find(p => p.name === propName);
+                const prop = classInfo.properties.find((p) => p.name === propName);
                 if (!prop) return;
                 properties[propName] = convertCellValue(normalizedRow[colIndex], prop);
             });
@@ -111,7 +108,7 @@ export function importCsvEntries(
     }
 
     for (const [entryIndex, entry] of entries.entries()) {
-        const classInfo = metamodelClasses.find(c => c.name === entry.className);
+        const classInfo = metamodelClasses.find((c) => c.name === entry.className);
         if (!classInfo) continue;
 
         const rows = parseCsv(entry.csvText);
@@ -121,9 +118,9 @@ export function importCsvEntries(
         const dataRows = rows.slice(1);
         const columnToProperty = resolveColumnMapping(entry, header, classInfo, []);
 
-        const refCols = header.filter(colName => {
+        const refCols = header.filter((colName) => {
             const propName = columnToProperty.get(colName);
-            const prop = propName ? classInfo.properties.find(p => p.name === propName) : undefined;
+            const prop = propName ? classInfo.properties.find((p) => p.name === propName) : undefined;
             return prop?.isReference;
         });
 
@@ -135,17 +132,22 @@ export function importCsvEntries(
             const normalizedRow = normalizeRow(row, header.length, rowIndex + 2, warnings);
             const sourceInstanceName = `${entry.className}_${nameOffset + rowIndex}`;
 
-            refCols.forEach(colName => {
+            refCols.forEach((colName) => {
                 const propName = columnToProperty.get(colName)!;
-                const prop = classInfo.properties.find(p => p.name === propName)!;
+                const prop = classInfo.properties.find((p) => p.name === propName)!;
                 const rawValue = normalizedRow[header.indexOf(colName)];
                 if (!rawValue) return;
 
-                const targetIds = rawValue.split(";").map(s => s.trim()).filter(Boolean);
-                targetIds.forEach(targetId => {
+                const targetIds = rawValue
+                    .split(";")
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+                targetIds.forEach((targetId) => {
                     const targetInstanceName = idMap.get(`${prop.referencedClass}:${targetId}`);
                     if (!targetInstanceName) {
-                        warnings.push(`Reference '${targetId}' in column '${colName}' of '${entry.className}' row ${rowIndex + 2} could not be resolved.`);
+                        warnings.push(
+                            `Reference '${targetId}' in column '${colName}' of '${entry.className}' row ${rowIndex + 2} could not be resolved.`
+                        );
                         return;
                     }
                     allLinks.push({
@@ -185,11 +187,15 @@ function resolveColumnMapping(
         const columnToProperty = new Map<string, string>();
         for (const mapping of entry.mappings) {
             if (!header.includes(mapping.csvColumn)) {
-                warnings.push(`CSV for '${entry.className}' has no column '${mapping.csvColumn}' referenced by its mapping — skipping.`);
+                warnings.push(
+                    `CSV for '${entry.className}' has no column '${mapping.csvColumn}' referenced by its mapping — skipping.`
+                );
                 continue;
             }
-            if (!classInfo.properties.some(p => p.name === mapping.property)) {
-                warnings.push(`Class '${entry.className}' has no property '${mapping.property}' referenced by its mapping — skipping.`);
+            if (!classInfo.properties.some((p) => p.name === mapping.property)) {
+                warnings.push(
+                    `Class '${entry.className}' has no property '${mapping.property}' referenced by its mapping — skipping.`
+                );
                 continue;
             }
             columnToProperty.set(mapping.csvColumn, mapping.property);
@@ -197,13 +203,15 @@ function resolveColumnMapping(
         return columnToProperty;
     }
 
-    const propertyNames = new Set(classInfo.properties.map(p => p.name));
+    const propertyNames = new Set(classInfo.properties.map((p) => p.name));
     const columnToProperty = new Map<string, string>(
-        header.filter(h => h !== "_id" && propertyNames.has(h)).map(h => [h, h])
+        header.filter((h) => h !== "_id" && propertyNames.has(h)).map((h) => [h, h])
     );
-    const unknownCols = header.filter(h => h !== "_id" && !columnToProperty.has(h));
+    const unknownCols = header.filter((h) => h !== "_id" && !columnToProperty.has(h));
     if (unknownCols.length > 0) {
-        warnings.push(`CSV for '${entry.className}' has unknown columns: ${unknownCols.join(", ")} — they will be ignored.`);
+        warnings.push(
+            `CSV for '${entry.className}' has unknown columns: ${unknownCols.join(", ")} — they will be ignored.`
+        );
     }
     return columnToProperty;
 }
@@ -240,4 +248,3 @@ function normalizeRow(row: string[], expectedLength: number, rowNumber: number, 
     warnings.push(`Row ${rowNumber} has more columns than the header; extra values ignored.`);
     return row.slice(0, expectedLength);
 }
-

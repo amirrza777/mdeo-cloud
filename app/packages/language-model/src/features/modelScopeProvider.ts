@@ -10,7 +10,6 @@ import type {
     Scope
 } from "langium";
 import {
-    ObjectInstance,
     PropertyAssignment,
     EnumValue,
     LinkEnd,
@@ -32,8 +31,7 @@ import {
 } from "@mdeo/language-metamodel";
 import { AssociationEndCache } from "./associationEndCache.js";
 
-const { DefaultScopeProvider, AstUtils, EMPTY_SCOPE, MapScope, DocumentCache, DocumentState } =
-    sharedImport("langium");
+const { DefaultScopeProvider, AstUtils, EMPTY_SCOPE, MapScope, DocumentCache, DocumentState } = sharedImport("langium");
 
 /**
  * The scope provider for the Model language.
@@ -220,9 +218,7 @@ export class ModelScopeProvider extends DefaultScopeProvider {
             return EMPTY_SCOPE;
         }
         const document = AstUtils.getDocument(model);
-        return this.objectInstanceScopeCache.get(document.uri, model, () =>
-            this.createMapScopeForNodes(model.objects)
-        );
+        return this.objectInstanceScopeCache.get(document.uri, model, () => this.createMapScopeForNodes(model.objects));
     }
 
     /**

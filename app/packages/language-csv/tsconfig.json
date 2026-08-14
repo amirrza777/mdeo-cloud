@@ -6,8 +6,5 @@
         "composite": true
     },
     "include": ["src"],
-    "references": [
-        { "path": "../language-common" },
-        { "path": "../language-shared" }
-    ]
+    "references": [{ "path": "../language-common" }, { "path": "../language-shared" }]
 }
