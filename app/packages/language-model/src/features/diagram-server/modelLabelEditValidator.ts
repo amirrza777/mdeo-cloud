@@ -144,8 +144,7 @@ export class ModelLabelEditValidator extends BaseLabelEditValidator {
 
         for (const cls of classChain) {
             propertyDef = (cls.properties ?? []).find((p) => (p as PropertyType).name === propertyName) as
-                | PropertyType
-                | undefined;
+                PropertyType | undefined;
             if (propertyDef != undefined) {
                 break;
             }

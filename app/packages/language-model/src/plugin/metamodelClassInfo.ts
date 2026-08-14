@@ -113,8 +113,7 @@ class MetamodelClassInfoResolver extends BaseMetamodelHelper {
 
     private toAttributePropertyInfo(property: PropertyType): MetamodelPropertyInfo {
         const type = property.type as
-            | { name?: string; enum?: { ref?: { name?: string; entries?: { name: string }[] } } }
-            | undefined;
+            { name?: string; enum?: { ref?: { name?: string; entries?: { name: string }[] } } } | undefined;
 
         if (type?.enum != undefined) {
             return {

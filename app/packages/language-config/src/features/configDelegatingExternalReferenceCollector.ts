@@ -47,8 +47,7 @@ export class ConfigDelegatingExternalReferenceCollector implements ExternalRefer
 
         for (const languageKey of this.pluginLanguageKeys) {
             const pluginServices = getServicesByLanguageId(registry, languageKey) as
-                | (LangiumCoreServices & Partial<ExternalReferenceAdditionalServices>)
-                | undefined;
+                (LangiumCoreServices & Partial<ExternalReferenceAdditionalServices>) | undefined;
             const collector = pluginServices?.references?.ExternalReferenceCollector;
             if (collector == undefined) {
                 continue;

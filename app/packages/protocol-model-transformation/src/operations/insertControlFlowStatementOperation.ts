@@ -4,15 +4,7 @@ import type { Operation } from "@eclipse-glsp/protocol";
  * Supported insertion kinds for control-flow edge context actions.
  */
 export type InsertControlFlowStatementKind =
-    | "match"
-    | "for-match"
-    | "if-match"
-    | "while-match"
-    | "until-match"
-    | "if"
-    | "while"
-    | "stop"
-    | "kill";
+    "match" | "for-match" | "if-match" | "while-match" | "until-match" | "if" | "while" | "stop" | "kill";
 
 /**
  * Operation to insert a new control-flow statement between two connected nodes.

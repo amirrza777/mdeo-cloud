@@ -551,8 +551,7 @@ export class ModelGModelFactory extends BaseGModelFactory<PartialModel> {
         languageKey: string
     ): ModelDiagramContributionServices | undefined {
         const services = getServicesByLanguageId(registry, languageKey) as
-            | ModelDiagramContributionAdditionalServices
-            | undefined;
+            ModelDiagramContributionAdditionalServices | undefined;
         return services?.diagram?.Contribution;
     }
 

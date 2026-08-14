@@ -55,13 +55,7 @@ export interface SerializedAst extends Pick<AstNode, "$type"> {
  * An entry in the serialized AST representation.
  */
 export type SerializedAstEntry =
-    | string
-    | number
-    | boolean
-    | null
-    | SerializedAst
-    | SerializedReference
-    | SerializedMultiReference;
+    string | number | boolean | null | SerializedAst | SerializedReference | SerializedMultiReference;
 
 /**
  * Base interface for serialized references.

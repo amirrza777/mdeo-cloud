@@ -63,9 +63,7 @@ export type SimpleInterfaceDeclarationValue = Primitive | TypeType | RefType<any
  * This includes simple values, arrays of simple values, and optional values.
  */
 export type InterfaceDeclarationValue =
-    | SimpleInterfaceDeclarationValue
-    | [SimpleInterfaceDeclarationValue]
-    | OptionalType<SimpleInterfaceDeclarationValue>;
+    SimpleInterfaceDeclarationValue | [SimpleInterfaceDeclarationValue] | OptionalType<SimpleInterfaceDeclarationValue>;
 
 /**
  * Type representing the complete attribute declaration for an interface.

@@ -94,8 +94,7 @@ export class ConfigActionProvider implements ActionProvider {
         }
 
         const pluginServices = getServicesByLanguageId(this.serviceRegistry, executablePlugin.languageKey) as
-            | (LangiumCoreServices & Partial<ActionHandlerRegistryAdditionalServices>)
-            | undefined;
+            (LangiumCoreServices & Partial<ActionHandlerRegistryAdditionalServices>) | undefined;
         const runHandler = pluginServices?.action?.ActionHandlerRegistry?.getHandler("run");
         return runHandler != undefined;
     }

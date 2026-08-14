@@ -43,8 +43,7 @@ export function rehypePlotly(onPlot: (plot: PlotEmbed) => void, idGenerator: () 
                 return;
             }
 
-            const className = codeElement.properties?.className;
-            const classes = Array.isArray(className) ? className : [className];
+            const classes = codeElement.properties?.className ?? [];
             if (!classes.includes("language-plot")) {
                 return;
             }
@@ -62,7 +61,7 @@ export function rehypePlotly(onPlot: (plot: PlotEmbed) => void, idGenerator: () 
                 tagName: "div",
                 properties: {
                     id: plotId,
-                    className: "plotly-placeholder"
+                    className: ["plotly-placeholder"]
                 },
                 children: []
             };

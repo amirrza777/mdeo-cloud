@@ -10,7 +10,8 @@ export function rehypeAddClasses() {
             const classes = getClassesForElement(node.tagName);
             if (classes) {
                 node.properties = node.properties || {};
-                node.properties.className = classes;
+                // hast models `className` as a list of individual class names.
+                node.properties.className = classes.split(" ");
             }
         });
 
@@ -20,7 +21,7 @@ export function rehypeAddClasses() {
                     type: "element",
                     tagName: "div",
                     properties: {
-                        className: "no-scrollbar my-6 w-full overflow-y-auto rounded-lg border"
+                        className: "no-scrollbar my-6 w-full overflow-y-auto rounded-lg border".split(" ")
                     },
                     children: [node]
                 };

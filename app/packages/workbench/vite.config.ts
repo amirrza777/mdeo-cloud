@@ -115,6 +115,10 @@ export default defineConfig({
         }
     },
     build: {
+        // Vite 8 minifies CSS with lightningcss by default, which rejects the malformed
+        // `color: var()` that @eclipse-glsp/client ships in css/status-overlay.css. Until
+        // that is fixed upstream, keep the more forgiving esbuild minifier.
+        cssMinify: "esbuild",
         rollupOptions: {
             output: {
                 format: "es",

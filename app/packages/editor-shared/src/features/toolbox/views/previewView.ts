@@ -20,8 +20,7 @@ function extractGhostElement(item: ToolboxEditEntry): GhostElement | undefined {
     }
 
     const triggerAction = actions.find((action: Action) => TriggerNodeCreationActionNS.is(action)) as
-        | TriggerNodeCreationAction
-        | undefined;
+        TriggerNodeCreationAction | undefined;
 
     return triggerAction?.ghostElement;
 }

@@ -26,8 +26,7 @@ export function addActionHandlers(
 
     connection.onRequest(ActionProtocol.ActionStartRequest, async (params) => {
         const languageServices = getServicesByLanguageId(services.ServiceRegistry, params.languageId) as
-            | ActionExtendedServices
-            | undefined;
+            ActionExtendedServices | undefined;
         if (languageServices == undefined) {
             throw new Error(`Language services not found for language: ${params.languageId}`);
         }
@@ -51,8 +50,7 @@ export function addActionHandlers(
     connection.onRequest(ActionProtocol.ActionSubmitRequest, async (params) => {
         const languageId = params.config.languageId;
         const languageServices = getServicesByLanguageId(services.ServiceRegistry, languageId) as
-            | ActionExtendedServices
-            | undefined;
+            ActionExtendedServices | undefined;
         if (languageServices == undefined) {
             throw new Error(`Language services not found for language: ${languageId}`);
         }
@@ -75,8 +73,7 @@ export function addActionHandlers(
 
     connection.onRequest(ActionProtocol.GetFileActionsRequest, async (params) => {
         const languageServices = getServicesByLanguageId(services.ServiceRegistry, params.languageId) as
-            | ActionExtendedServices
-            | undefined;
+            ActionExtendedServices | undefined;
         if (languageServices == undefined) {
             return { actions: [] };
         }
