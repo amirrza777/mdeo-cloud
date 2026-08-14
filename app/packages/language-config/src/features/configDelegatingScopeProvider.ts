@@ -3,7 +3,7 @@ import type { ConfigContributionPlugin } from "../plugin/configContributionPlugi
 import type { BaseConfigSectionType } from "../grammar/configTypes.js";
 import type { ResolvedConfigContributionPlugins } from "../plugin/resolvePlugins.js";
 import { sharedImport } from "@mdeo/language-shared";
-import { getServicesByLanguageId } from "./util.js";
+import { getServicesByLanguageId } from "@mdeo/language-common";
 
 const { EMPTY_SCOPE, DefaultScopeProvider, AstUtils } = sharedImport("langium");
 

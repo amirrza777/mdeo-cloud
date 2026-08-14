@@ -4,7 +4,7 @@ import { sharedImport } from "@mdeo/language-shared";
 import type { ConfigContributionPlugin } from "../plugin/configContributionPlugin.js";
 import type { ResolvedConfigContributionPlugins, SectionNamingInfo } from "../plugin/resolvePlugins.js";
 import type { ConfigType, BaseConfigSectionType } from "../grammar/configTypes.js";
-import { getServicesByLanguageId } from "../features/util.js";
+import { getServicesByLanguageId } from "@mdeo/language-common";
 
 const { MultiMap, Cancellation } = sharedImport("langium");
 

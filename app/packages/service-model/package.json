@@ -24,6 +24,7 @@
     "dependencies": {
         "@mdeo/editor-model": "^0.2.11",
         "@mdeo/language-common": "^0.2.11",
+        "@mdeo/language-metamodel": "^0.2.11",
         "@mdeo/language-model": "^0.2.11",
         "@mdeo/language-shared": "^0.2.11",
         "@mdeo/plugin": "^0.2.11",

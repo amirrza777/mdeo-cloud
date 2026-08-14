@@ -1,6 +1,6 @@
 import type { Connection } from "vscode-languageserver/browser.js";
 import type { LangiumSharedCoreServices, LangiumCoreServices } from "langium";
-import { createActionProtocol } from "@mdeo/language-common";
+import { createActionProtocol, getServicesByLanguageId } from "@mdeo/language-common";
 import type { ActionHandlerRegistryAdditionalServices } from "@mdeo/language-shared";
 import type { PluginContext } from "@mdeo/language-common";
 
@@ -8,21 +8,6 @@ import type { PluginContext } from "@mdeo/language-common";
  * Language services extended with action handler registry support.
  */
 type ActionExtendedServices = LangiumCoreServices & Partial<ActionHandlerRegistryAdditionalServices>;
-
-/**
- * Finds language services by language ID from the service registry.
- *
- * @param services The shared Langium services containing the registry
- * @param languageId The language identifier to look up
- * @returns The language services if found, undefined otherwise
- */
-function getServicesByLanguageId(
-    services: LangiumSharedCoreServices,
-    languageId: string
-): ActionExtendedServices | undefined {
-    const allServices = services.ServiceRegistry.all as readonly ActionExtendedServices[];
-    return allServices.find((langServices) => langServices.LanguageMetaData.languageId === languageId);
-}
 
 /**
  * Registers action dialog request handlers on the LSP connection.
@@ -40,7 +25,9 @@ export function addActionHandlers(
     const ActionProtocol = createActionProtocol(pluginContext["vscode-languageserver-protocol"]);
 
     connection.onRequest(ActionProtocol.ActionStartRequest, async (params) => {
-        const languageServices = getServicesByLanguageId(services, params.languageId);
+        const languageServices = getServicesByLanguageId(services.ServiceRegistry, params.languageId) as
+            | ActionExtendedServices
+            | undefined;
         if (languageServices == undefined) {
             throw new Error(`Language services not found for language: ${params.languageId}`);
         }
@@ -63,7 +50,9 @@ export function addActionHandlers(
 
     connection.onRequest(ActionProtocol.ActionSubmitRequest, async (params) => {
         const languageId = params.config.languageId;
-        const languageServices = getServicesByLanguageId(services, languageId);
+        const languageServices = getServicesByLanguageId(services.ServiceRegistry, languageId) as
+            | ActionExtendedServices
+            | undefined;
         if (languageServices == undefined) {
             throw new Error(`Language services not found for language: ${languageId}`);
         }
@@ -85,7 +74,9 @@ export function addActionHandlers(
     });
 
     connection.onRequest(ActionProtocol.GetFileActionsRequest, async (params) => {
-        const languageServices = getServicesByLanguageId(services, params.languageId);
+        const languageServices = getServicesByLanguageId(services.ServiceRegistry, params.languageId) as
+            | ActionExtendedServices
+            | undefined;
         if (languageServices == undefined) {
             return { actions: [] };
         }

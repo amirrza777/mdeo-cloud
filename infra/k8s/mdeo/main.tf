@@ -36,5 +36,5 @@ locals {
   # These must be relative paths so they work in the browser (the browser
   # cannot resolve internal k8s service hostnames). The backend uses
   # INTERNAL_PLUGIN_BASE_URL (http://workbench:80) as the prefix server-side.
-  plugin_service_urls = "/plugin/metamodel,/plugin/model,/plugin/script,/plugin/model-transformation,/plugin/config,/plugin/config-optimization,/plugin/config-mdeo"
+  plugin_service_urls = "/plugin/metamodel,/plugin/model,/plugin/script,/plugin/model-transformation,/plugin/config,/plugin/config-optimization,/plugin/config-mdeo,/plugin/csv,/plugin/model-csv"
 }

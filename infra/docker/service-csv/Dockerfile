@@ -11,6 +11,8 @@ FROM node:24-alpine
 
 RUN apk add --no-cache curl
 
+ARG SERVICE_VERSION=""
+
 WORKDIR /workspace
 
 COPY --from=builder /build/packages /workspace/packages
@@ -22,6 +24,7 @@ WORKDIR /workspace/packages/service-csv
 ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOST=0.0.0.0
+ENV SERVICE_VERSION=${SERVICE_VERSION}
 
 EXPOSE 3000
 
