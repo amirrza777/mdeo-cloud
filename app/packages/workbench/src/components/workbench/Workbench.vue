@@ -37,7 +37,7 @@
     <ActionDialog :workbench-state="workbenchState" />
 </template>
 <script setup lang="ts">
-import { computed, provide, ref, Teleport, useTemplateRef, watch } from "vue";
+import { computed, nextTick, provide, ref, Teleport, useTemplateRef, watch } from "vue";
 import Tabs from "../tabs/Tabs.vue";
 import { ResizablePanelGroup, ResizableHandle } from "../ui/resizable";
 import Sidebar from "../sidebar/Sidebar.vue";
@@ -91,30 +91,32 @@ function onSidebarResize(size: number) {
 
 const sidebarCollapsed = computed(() => props.workbenchState.sidebarCollapsed.value);
 
-watch(
-    sidebarCollapsed,
-    (newValue) => {
-        if (newValue) {
-            sidebarPanel.value?.collapse();
-        } else {
-            sidebarPanel.value?.expand();
-        }
-    },
-    { immediate: true }
-);
+/**
+ * Applies the collapsed state to the sidebar panel.
+ *
+ * The panel registers itself with the splitter group while the workbench is still mounting, but the
+ * group only computes its initial layout one tick later. Collapsing or expanding before that point
+ * operates on an empty layout and throws, which aborts the mount and leaves the splitter without its
+ * second panel and its resize handle, so wait for the layout to exist first.
+ */
+async function applySidebarCollapsedState() {
+    await nextTick();
 
-watch(
-    () => sidebarPanel.value,
-    (panel) => {
-        if (panel) {
-            if (props.workbenchState.sidebarCollapsed.value) {
-                panel.collapse();
-            } else {
-                panel.expand();
-            }
-        }
+    const panel = sidebarPanel.value;
+    if (panel == undefined) {
+        return;
     }
-);
+
+    if (props.workbenchState.sidebarCollapsed.value) {
+        panel.collapse();
+    } else {
+        panel.expand();
+    }
+}
+
+watch(sidebarCollapsed, applySidebarCollapsedState, { immediate: true });
+
+watch(() => sidebarPanel.value, applySidebarCollapsedState);
 
 useEventListener(
     window,
