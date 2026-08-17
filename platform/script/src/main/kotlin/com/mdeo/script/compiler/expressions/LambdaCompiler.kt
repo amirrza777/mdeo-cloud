@@ -120,6 +120,21 @@ class LambdaCompiler : ExpressionCompiler() {
     }
 
     /**
+     * Returns the scope holding a lambda's parameters, given the scope its body statements
+     * were collected into.
+     *
+     * A lambda with a block body has a body scope below its parameter scope; one with an
+     * expression body has no body scope of its own, so both roles are filled by the same
+     * [LambdaScope].
+     *
+     * @param lambdaBodyScope The scope the lambda's body statements were collected into.
+     * @return The lambda's parameter scope, or null if there is none in the ancestor chain.
+     */
+    private fun paramsScopeOf(lambdaBodyScope: Scope): LambdaScope? {
+        return lambdaBodyScope as? LambdaScope ?: lambdaBodyScope.parent as? LambdaScope
+    }
+
+    /**
      * Collects captured variables using the scope tree.
      *
      * Uses the Scope.collectCapturedVariables method which walks the scope tree
@@ -134,7 +149,7 @@ class LambdaCompiler : ExpressionCompiler() {
         lambdaBodyScope: Scope,
         context: CompilationContext
     ): List<CapturedVariable> {
-        val lambdaParamsLevel = lambdaBodyScope.parent?.level ?: lambdaBodyScope.level
+        val lambdaParamsLevel = paramsScopeOf(lambdaBodyScope)?.level ?: lambdaBodyScope.level
         val capturedPairs = lambdaBodyScope.collectCapturedVariables(lambdaParamsLevel)
 
         return capturedPairs.mapNotNull { (name, declarationLevel) ->
@@ -196,7 +211,7 @@ class LambdaCompiler : ExpressionCompiler() {
                 "Lambda body scope not found in scope tree. This indicates a bug in ScopeBuilder."
             )
 
-        val lambdaParamsScope = lambdaBodyScope.parent as? LambdaScope
+        val lambdaParamsScope = paramsScopeOf(lambdaBodyScope)
             ?: throw IllegalStateException(
                 "Lambda params scope should be a LambdaScope. This indicates a bug in ScopeBuilder."
             )

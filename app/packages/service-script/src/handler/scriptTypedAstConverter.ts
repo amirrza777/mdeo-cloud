@@ -182,6 +182,7 @@ export class ScriptTypedAstConverter extends StatementTypedAstConverter {
         const parameters = expr.parameterList.parameters.map((param: any) => param.name);
 
         let body: TypedCallableBody;
+        let hasBlockBody: boolean;
         if (expr.expression != undefined) {
             const returnStatement: TypedReturnStatement = {
                 kind: "return",
@@ -190,17 +191,21 @@ export class ScriptTypedAstConverter extends StatementTypedAstConverter {
             body = {
                 body: [returnStatement]
             };
+            hasBlockBody = false;
         } else if (expr.body != undefined) {
             body = this.convertCallableBody(expr.body);
+            hasBlockBody = true;
         } else {
             body = { body: [] };
+            hasBlockBody = false;
         }
 
         return {
             kind: "lambda",
             evalType: this.getTypeIndex(expr),
             parameters,
-            body
+            body,
+            hasBlockBody
         };
     }
 

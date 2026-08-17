@@ -104,4 +104,14 @@ export interface TypedLambdaExpression extends TypedExpression {
      * Body of the lambda as statements.
      */
     body: TypedCallableBody;
+    /**
+     * Whether {@link body} is the lambda's own block. False when the lambda was written with an
+     * expression body, in which case {@link body} only wraps that expression in a synthetic return
+     * statement.
+     *
+     * A block body is a scope of its own and so raises the level of every scope inside it by one,
+     * while an expression body is not. Since the `scope` of an identifier is a level, the compiler
+     * has to be told which of the two shapes it is looking at to rebuild the same levels.
+     */
+    hasBlockBody: boolean;
 }

@@ -73,7 +73,8 @@ export class ScriptTypedAstMerger extends BaseTypedAstMerger {
             kind: "lambda",
             evalType: mapping.get(expr.evalType)!,
             parameters: expr.parameters,
-            body: this.remapCallableBody(expr.body, mapping)
+            body: this.remapCallableBody(expr.body, mapping),
+            hasBlockBody: expr.hasBlockBody
         };
     }
 
