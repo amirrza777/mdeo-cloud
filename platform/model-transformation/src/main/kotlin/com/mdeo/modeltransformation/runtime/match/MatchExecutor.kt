@@ -3,6 +3,7 @@ package com.mdeo.modeltransformation.runtime.match
 import com.mdeo.modeltransformation.ast.patterns.TypedPattern
 import com.mdeo.modeltransformation.ast.patterns.TypedPatternLinkElement
 import com.mdeo.modeltransformation.ast.patterns.TypedPatternObjectInstanceElement
+import com.mdeo.modeltransformation.ast.patterns.TypedPatternWhereClauseElement
 import com.mdeo.modeltransformation.compiler.SequentialLabelIdGenerator
 import com.mdeo.modeltransformation.compiler.VariableBinding
 import com.mdeo.modeltransformation.graph.VertexRef
@@ -90,6 +91,13 @@ class MatchExecutor {
      * those have to be part of the referenced set, so that the planner covers them before the
      * condition is emitted.
      *
+     * The nodes of an application condition are bound inside the condition's own
+     * sub-traversal, never by the match. They still need a binding while the traversal is
+     * built, so that an expression of the block — a where clause or a property comparison —
+     * compiles to `select(label)` on the label the condition chain assigns; the bindings are
+     * dropped again once the traversal is assembled, so they never leak into the statements
+     * that follow.
+     *
      * @param elements Categorised pattern elements.
      * @param context The current transformation execution context.
      * @param engine The transformation engine providing graph access and type information.
@@ -110,6 +118,12 @@ class MatchExecutor {
             context.variableScope.setBinding(varElement.variable.name, VariableBinding.LabelBinding(varLabel))
         }
 
+        val conditionInstanceNames = conditionInstanceNames(elements)
+            .filter { context.variableScope.getVariable(it) == null }
+        for (name in conditionInstanceNames) {
+            context.variableScope.setBinding(name, VariableBinding.InstanceBinding(vertexRef = null))
+        }
+
         val analyzer = MatchAnalyzer(context.variableScope)
         elements.variables.forEach { analyzer.analyzeVariable(it) }
         elements.variableReassignments.forEach { analyzer.analyzeExpression(it.reassignment.value) }
@@ -126,6 +140,10 @@ class MatchExecutor {
             .flatMap { it.condition.elements }
             .filterIsInstance<TypedPatternObjectInstanceElement>()
             .forEach { analyzer.analyzeObjectInstance(it) }
+        elements.conditions
+            .flatMap { it.condition.elements }
+            .filterIsInstance<TypedPatternWhereClauseElement>()
+            .forEach { analyzer.analyzeWhereClause(it) }
         val referencedInstances = analyzer.getReferencedInstances()
 
         val allMatchable = elements.matchableInstances + elements.deleteInstances
@@ -166,6 +184,8 @@ class MatchExecutor {
             expressionSupport, compilationContext, limit
         )
 
+        conditionInstanceNames.forEach { context.variableScope.removeBinding(it) }
+
         val planBoundNames = matchPlan.baseSteps.mapNotNull { step ->
             when (step) {
                 is BaseStep.VertexScan -> step.instanceName
@@ -184,6 +204,23 @@ class MatchExecutor {
         }
         return results
     }
+
+    /**
+     * Returns the names of the nodes that belong to an application condition alone.
+     *
+     * An instance declared inside a block carries a class name; an instance without one is a
+     * reference to a node of the enclosing match and is bound by the match itself.
+     *
+     * @param elements The categorised pattern elements.
+     * @return The condition-local node names of all blocks of the pattern.
+     */
+    private fun conditionInstanceNames(elements: PatternCategories): List<String> =
+        elements.conditions
+            .flatMap { it.condition.elements }
+            .filterIsInstance<TypedPatternObjectInstanceElement>()
+            .filter { it.objectInstance.className != null }
+            .map { it.objectInstance.name }
+            .distinct()
 
     /**
      * Prints a one-line-per-step summary of [plan] to stdout.
