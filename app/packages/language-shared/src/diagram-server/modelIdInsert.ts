@@ -265,9 +265,109 @@ class InsertIdComputer {
 }
 
 /**
+ * Separators with which diagram servers compose the id of a synthetic edge out of the ids of the
+ * two nodes it connects, e.g. `${sourceId}_to_${targetId}` for a control-flow edge or
+ * `${instanceId}_in_${matchId}` for a containment edge. An optional suffix may follow, e.g.
+ * `_label_then`.
+ */
+const COMPOSED_EDGE_ID_SEPARATORS = ["_to_", "_in_"];
+
+/**
+ * Separators that introduce the id of an auxiliary element derived from another element's id,
+ * e.g. `${edgeId}__label-node` for the label of an edge or `${statementId}_merge` for the merge
+ * node of a branching statement.
+ */
+const DERIVED_ID_SEPARATORS = ["__", "_merge"];
+
+/**
+ * Recomputes the id of an edge whose id is composed out of its endpoint ids, for the case that one
+ * of those endpoints has been renamed.
+ *
+ * @param id The current id of the edge
+ * @param edge The edge metadata, which carries the endpoint ids the id was composed from
+ * @param renames The renames to apply, mapping old to new id
+ * @returns The recomputed id, or `undefined` when the id is not composed of the endpoints or
+ *          neither endpoint was renamed
+ */
+function recomputeComposedEdgeId(
+    id: string,
+    edge: EdgeMetadata,
+    renames: ReadonlyMap<string, string>
+): string | undefined {
+    const from = renames.get(edge.from) ?? edge.from;
+    const to = renames.get(edge.to) ?? edge.to;
+    if (from === edge.from && to === edge.to) {
+        return undefined;
+    }
+
+    for (const separator of COMPOSED_EDGE_ID_SEPARATORS) {
+        const composed = `${edge.from}${separator}${edge.to}`;
+        if (id === composed || id.startsWith(`${composed}_`)) {
+            return `${from}${separator}${to}${id.slice(composed.length)}`;
+        }
+    }
+    return undefined;
+}
+
+/**
+ * Recomputes the id of an auxiliary element that is derived from the id of another element, for the
+ * case that the element it is derived from has been renamed.
+ *
+ * The longest matching prefix wins so that ids which are prefixes of one another (as produced by
+ * the uniqueness counter of {@link DefaultModelIdRegistry}) cannot be confused.
+ *
+ * @param id The current id of the auxiliary element
+ * @param renames The renames to apply, mapping old to new id
+ * @returns The recomputed id, or `undefined` when the id is not derived from a renamed element
+ */
+function recomputeDerivedId(id: string, renames: ReadonlyMap<string, string>): string | undefined {
+    let bestPrefix: string | undefined;
+    let bestReplacement: string | undefined;
+
+    for (const [oldId, newId] of renames) {
+        if (bestPrefix != undefined && oldId.length <= bestPrefix.length) {
+            continue;
+        }
+        if (DERIVED_ID_SEPARATORS.some((separator) => id.startsWith(`${oldId}${separator}`))) {
+            bestPrefix = oldId;
+            bestReplacement = newId;
+        }
+    }
+
+    if (bestPrefix == undefined || bestReplacement == undefined) {
+        return undefined;
+    }
+    return `${bestReplacement}${id.slice(bestPrefix.length)}`;
+}
+
+/**
+ * Applies the given renames to the endpoints of an edge.
+ *
+ * @param edge The edge metadata
+ * @param renames The renames to apply, mapping old to new id
+ * @returns The edge with renamed endpoints, or the unchanged edge when neither endpoint moved
+ */
+function remapEdgeEndpoints(edge: EdgeMetadata, renames: ReadonlyMap<string, string>): EdgeMetadata {
+    const from = renames.get(edge.from) ?? edge.from;
+    const to = renames.get(edge.to) ?? edge.to;
+    if (from === edge.from && to === edge.to) {
+        return edge;
+    }
+    return { ...edge, from, to };
+}
+
+/**
  * Builds {@link MetadataEdits} that rename metadata entries according to the given
  * id changes. For each changed id, the old entry is removed (set to `null`) and
  * the existing metadata is re-inserted under the new id.
+ *
+ * Ids that a diagram server derives from other ids are renamed along with them, because they change
+ * without ever showing up in {@link InsertIdResult.idChanges} (only ids handed out by the
+ * {@link ModelIdProvider} do): the id of a control-flow edge is built from the ids of the two
+ * statements it connects, the id of an edge label from the id of its edge, and so on. Leaving those
+ * behind orphans the layout of every such element on each insertion that shifts an index-based id.
+ * The endpoints recorded on an edge are remapped for the same reason - an entry pointing at a node
+ * id that no longer exists is inconsistent metadata.
  *
  * @param idChanges The list of id changes from {@link InsertIdResult.idChanges}
  * @param currentMetadata The current graph metadata to look up existing entries
@@ -281,21 +381,88 @@ export function buildIdChangeMetadataEdits(
         return undefined;
     }
 
+    const renames = new Map<string, string>();
+    for (const { oldId, newId } of idChanges) {
+        renames.set(oldId, newId);
+    }
+
+    // Edges first: the auxiliary elements of an edge are derived from the edge's id, which itself is
+    // derived from the ids of its endpoints.
+    for (const [id, edge] of Object.entries(currentMetadata.edges)) {
+        if (renames.has(id)) {
+            continue;
+        }
+        const recomputed = recomputeComposedEdgeId(id, edge, renames);
+        if (recomputed != undefined && recomputed !== id) {
+            renames.set(id, recomputed);
+        }
+    }
+
+    const derived = new Map<string, string>();
+    for (const id of [...Object.keys(currentMetadata.nodes), ...Object.keys(currentMetadata.edges)]) {
+        if (renames.has(id)) {
+            continue;
+        }
+        const recomputed = recomputeDerivedId(id, renames);
+        if (recomputed != undefined && recomputed !== id) {
+            derived.set(id, recomputed);
+        }
+    }
+    for (const [id, recomputed] of derived) {
+        renames.set(id, recomputed);
+    }
+
     const nodeEdits: Record<string, Partial<NodeMetadata> | null> = {};
     const edgeEdits: Record<string, Partial<EdgeMetadata> | null> = {};
 
-    for (const { oldId, newId } of idChanges) {
+    const renamedNodes = new Map<string, NodeMetadata>();
+    const renamedEdges = new Map<string, EdgeMetadata>();
+    const vacatedNodeIds = new Set<string>();
+    const vacatedEdgeIds = new Set<string>();
+
+    for (const [oldId, newId] of renames) {
         const nodeEntry = currentMetadata.nodes[oldId];
         if (nodeEntry != undefined) {
-            nodeEdits[oldId] = null;
-            nodeEdits[newId] = nodeEntry;
+            renamedNodes.set(newId, nodeEntry);
+            vacatedNodeIds.add(oldId);
         }
 
         const edgeEntry = currentMetadata.edges[oldId];
         if (edgeEntry != undefined) {
-            edgeEdits[oldId] = null;
-            edgeEdits[newId] = edgeEntry;
+            renamedEdges.set(newId, remapEdgeEndpoints(edgeEntry, renames));
+            vacatedEdgeIds.add(oldId);
         }
+    }
+
+    // Edges that keep their id but whose endpoints moved.
+    for (const [id, edge] of Object.entries(currentMetadata.edges)) {
+        if (renames.has(id)) {
+            continue;
+        }
+        const remapped = remapEdgeEndpoints(edge, renames);
+        if (remapped !== edge) {
+            edgeEdits[id] = remapped;
+        }
+    }
+
+    // An id that is vacated by one rename can be occupied by another (ids shift by one when a
+    // statement is inserted in front of its siblings), so removals are emitted first and only for
+    // ids that nothing is written to.
+    for (const id of vacatedNodeIds) {
+        if (!renamedNodes.has(id)) {
+            nodeEdits[id] = null;
+        }
+    }
+    for (const [id, entry] of renamedNodes) {
+        nodeEdits[id] = entry;
+    }
+    for (const id of vacatedEdgeIds) {
+        if (!renamedEdges.has(id)) {
+            edgeEdits[id] = null;
+        }
+    }
+    for (const [id, entry] of renamedEdges) {
+        edgeEdits[id] = entry;
     }
 
     const hasNodeEdits = Object.keys(nodeEdits).length > 0;

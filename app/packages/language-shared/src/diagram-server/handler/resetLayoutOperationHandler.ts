@@ -22,23 +22,24 @@ export class ResetLayoutOperationHandler extends BaseOperationHandler {
         const scope = operation.scope ?? "all";
         const modelState = this.modelState;
 
+        // Sizing lives on nodes and routing on edges, so which of the two maps the edit belongs in
+        // follows from the element itself. Writing into the wrong map would leave the layout in
+        // place and add an entry that belongs to no diagram element.
+        const isEdge = modelState.metadata.edges[elementId] != undefined;
+
         const newMetadata: Record<string, undefined> = {};
-        if (scope === "bounds" || scope === "all") {
+        if (!isEdge && (scope === "bounds" || scope === "all")) {
             newMetadata["prefWidth"] = undefined;
             newMetadata["prefHeight"] = undefined;
         }
-        if (scope === "routing" || scope === "all") {
+        if (isEdge && (scope === "routing" || scope === "all")) {
             newMetadata["routingPoints"] = undefined;
             newMetadata["sourceAnchor"] = undefined;
             newMetadata["targetAnchor"] = undefined;
         }
 
-        return new OperationHandlerCommand(modelState, undefined, {
-            nodes: {
-                [elementId]: {
-                    meta: newMetadata
-                }
-            }
-        });
+        const edits = { [elementId]: { meta: newMetadata } };
+
+        return new OperationHandlerCommand(modelState, undefined, isEdge ? { edges: edits } : { nodes: edits });
     }
 }
