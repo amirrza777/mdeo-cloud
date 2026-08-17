@@ -47,7 +47,7 @@ This build also exposes the internal ports, which is what you want while debuggi
 | --- | --- |
 | 4242 | Workbench |
 | 8080 | Backend API |
-| 3001–3008 | Plugin services (metamodel, model, script, model-transformation, config, config-optimization, model-csv, config-mdeo) |
+| 3000–3008 | The nine plugin services, on the same ports the [Vite dev proxy](/develop/local-development) expects |
 | 5432–5435 | PostgreSQL instances (backend, script, model-transformation, optimizer) |
 
 For iterating on the frontend without Docker, see [Local development](/develop/local-development).

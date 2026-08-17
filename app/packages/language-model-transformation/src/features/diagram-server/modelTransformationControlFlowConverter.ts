@@ -125,11 +125,7 @@ export interface ControlFlowMergeNode {
  * Discriminated union of all supported control-flow node kinds.
  */
 export type ControlFlowNode =
-    | ControlFlowStartNode
-    | ControlFlowEndNode
-    | ControlFlowMatchNode
-    | ControlFlowSplitNode
-    | ControlFlowMergeNode;
+    ControlFlowStartNode | ControlFlowEndNode | ControlFlowMatchNode | ControlFlowSplitNode | ControlFlowMergeNode;
 
 /**
  * A directed edge in the control-flow graph.

@@ -159,8 +159,7 @@ async function handleDownload(): Promise<void> {
     if (isMarkdownReportFolder.value) {
         const folder = props.entry as Folder;
         const mdFile = folder.children.find((c) => c.type === FileType.File && (c as File).extension === ".md") as
-            | File
-            | undefined;
+            File | undefined;
         if (!mdFile) return;
         downloadUri = mdFile.uri;
         downloadName = mdFile.name;

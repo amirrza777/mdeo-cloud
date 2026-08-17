@@ -24,12 +24,7 @@ export type AbstractElement =
  * a parser rule. These are converted to AbstractElements during rule compilation.
  */
 export type RuleEntry =
-    | AbstractElement
-    | string
-    | TerminalRule<any>
-    | ParserRule<any>
-    | (() => ParserRule<any>)
-    | CrossRef<any>;
+    AbstractElement | string | TerminalRule<any> | ParserRule<any> | (() => ParserRule<any>) | CrossRef<any>;
 
 /**
  * Represents a cross-reference to another AST node type in the grammar.

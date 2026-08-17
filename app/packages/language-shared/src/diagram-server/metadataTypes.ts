@@ -108,6 +108,12 @@ export namespace NodeLayoutMetadataUtil {
     /**
      * Verifies and corrects invalid metadata.
      *
+     * A missing preferred width is only treated as a defect when the caller has a default to supply
+     * for it. Elements that are laid out by their parent - the label of an edge, the ends of a link -
+     * legitimately store nothing but a position, and reporting a correction for those on every
+     * validation pass would rewrite and re-upload the metadata of the whole diagram whenever
+     * anything in it changes.
+     *
      * @param obj The object to verify
      * @param defaultPrefWidth Default preferred width if invalid
      * @returns Corrected metadata if invalid, undefined if valid
@@ -118,6 +124,16 @@ export namespace NodeLayoutMetadataUtil {
         }
 
         const meta = (typeof obj === "object" && obj !== null ? obj : {}) as Partial<NodeLayoutMetadata>;
+
+        if (
+            defaultPrefWidth === undefined &&
+            meta.prefWidth === undefined &&
+            isValidPoint(meta.position) &&
+            (meta.prefHeight === undefined || typeof meta.prefHeight === "number")
+        ) {
+            return undefined;
+        }
+
         const position = meta.position && isValidPoint(meta.position) ? meta.position : { x: 0, y: 0 };
         const prefWidth = typeof meta.prefWidth === "number" ? meta.prefWidth : defaultPrefWidth;
         const prefHeight = typeof meta.prefHeight === "number" ? meta.prefHeight : undefined;

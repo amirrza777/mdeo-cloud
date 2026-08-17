@@ -103,7 +103,7 @@ resource "kubernetes_deployment_v1" "backend" {
           command = [
             "sh", "-c",
             <<-EOT
-              for path in /plugin/metamodel/ /plugin/model/ /plugin/script/ /plugin/model-transformation/ /plugin/config/ /plugin/config-optimization/ /plugin/config-mdeo/; do
+              for path in /plugin/metamodel/ /plugin/model/ /plugin/script/ /plugin/model-transformation/ /plugin/config/ /plugin/config-optimization/ /plugin/config-mdeo/ /plugin/csv/ /plugin/model-csv/; do
                 echo "Waiting for workbench$path ...";
                 until wget -q -O /dev/null "http://workbench:80$path"; do sleep 3; done;
                 echo "Ready: $path";

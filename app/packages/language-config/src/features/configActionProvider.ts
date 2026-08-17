@@ -1,12 +1,17 @@
 import type { GetFileActionsParams, GetFileActionsResponse, ActionIconNode } from "@mdeo/language-common";
-import { convertIcon, FileCategory, parseUri, ActionDisplayLocation } from "@mdeo/language-common";
+import {
+    convertIcon,
+    FileCategory,
+    parseUri,
+    ActionDisplayLocation,
+    getServicesByLanguageId
+} from "@mdeo/language-common";
 import type { LangiumCoreServices, LangiumSharedCoreServices, ServiceRegistry } from "langium";
 import { Play } from "lucide";
 import { sharedImport, type ActionProvider, type ActionHandlerRegistryAdditionalServices } from "@mdeo/language-shared";
 import type { ConfigContributionPlugin } from "../plugin/configContributionPlugin.js";
 import type { ResolvedConfigContributionPlugins, SectionNamingInfo } from "../plugin/resolvePlugins.js";
 import type { ConfigType } from "../grammar/configTypes.js";
-import { getServicesByLanguageId } from "./util.js";
 
 const { URI } = sharedImport("langium");
 
@@ -89,8 +94,7 @@ export class ConfigActionProvider implements ActionProvider {
         }
 
         const pluginServices = getServicesByLanguageId(this.serviceRegistry, executablePlugin.languageKey) as
-            | (LangiumCoreServices & Partial<ActionHandlerRegistryAdditionalServices>)
-            | undefined;
+            (LangiumCoreServices & Partial<ActionHandlerRegistryAdditionalServices>) | undefined;
         const runHandler = pluginServices?.action?.ActionHandlerRegistry?.getHandler("run");
         return runHandler != undefined;
     }

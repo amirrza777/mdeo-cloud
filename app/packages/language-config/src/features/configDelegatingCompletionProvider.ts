@@ -11,7 +11,7 @@ import { sharedImport } from "@mdeo/language-shared";
 import type { BaseConfigSectionType } from "../grammar/configTypes.js";
 import type { ConfigContributionPlugin } from "../plugin/configContributionPlugin.js";
 import type { ResolvedConfigContributionPlugins } from "../plugin/resolvePlugins.js";
-import { getServicesByLanguageId } from "./util.js";
+import { getServicesByLanguageId } from "@mdeo/language-common";
 
 const { DefaultCompletionProvider } = sharedImport("langium/lsp");
 const { AstUtils } = sharedImport("langium");

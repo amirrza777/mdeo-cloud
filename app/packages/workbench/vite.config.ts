@@ -30,7 +30,7 @@ export default defineConfig({
         // Matched by prefix in declaration order, so a longer path has to come
         // before any shorter path it starts with: model-transformation and
         // model-csv before model, config-optimization and config-mdeo before
-        // config, and plain csv last.
+        // config.
         proxy: {
             "/plugin/model-transformation": {
                 target: "http://localhost:3003",
@@ -120,6 +120,10 @@ export default defineConfig({
         }
     },
     build: {
+        // Vite 8 minifies CSS with lightningcss by default, which rejects the malformed
+        // `color: var()` that @eclipse-glsp/client ships in css/status-overlay.css. Until
+        // that is fixed upstream, keep the more forgiving esbuild minifier.
+        cssMinify: "esbuild",
         rollupOptions: {
             output: {
                 format: "es",

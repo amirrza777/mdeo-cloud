@@ -20,7 +20,6 @@ import com.mdeo.expression.ast.statements.TypedStatement
 import com.mdeo.expression.ast.statements.TypedVariableDeclarationStatement
 import com.mdeo.expression.ast.statements.TypedWhileStatement
 import com.mdeo.expression.ast.types.ClassTypeRef
-import com.mdeo.expression.ast.types.LambdaType
 import com.mdeo.expression.ast.types.ReturnType
 import com.mdeo.expression.ast.types.ValueType
 import com.mdeo.script.compiler.util.ASMUtil
@@ -53,8 +52,10 @@ data class VariableInfo(
  * - Level 3: Function body scope
  * - Level 4+: Nested scopes (while, if, for body, etc.)
  *
- * Functions and lambdas create TWO scopes: one for parameters (level N)
- * and one for the body (level N+1).
+ * Functions create TWO scopes: one for parameters (level N) and one for the body (level N+1).
+ * A lambda does the same, except when its body is an expression rather than a block: the
+ * language server counts no scope for an expression body, so neither does the compiler and
+ * the lambda's single scope holds its parameters.
  *
  * @param level The scope level (depth). 0 = global, 1 = file, 2 = function params, etc.
  * @param parent The parent scope, or null for the root scope.
@@ -476,10 +477,19 @@ class ScopeBuilder(
 
             is TypedLambdaExpression -> {
                 val lambdaParamsScope = LambdaScope(scope)
-                
-                val lambdaType = context.getType(expression.evalType) as? LambdaType
 
-                val lambdaBodyScope = lambdaParamsScope.createChild()
+                /*
+                 * A block body is a scope of its own, an expression body is not. The identifier
+                 * scope levels in the AST were assigned by the language server on exactly that
+                 * basis, so a synthetic body for an expression body must not consume a level here
+                 * either - otherwise everything declared further in (the parameters of a nested
+                 * lambda, most visibly) ends up one level below the level its reads refer to.
+                 */
+                val lambdaBodyScope = if (expression.hasBlockBody) {
+                    lambdaParamsScope.createChild()
+                } else {
+                    lambdaParamsScope
+                }
                 statementScopes[expression] = lambdaBodyScope
                 for (bodyStmt in expression.body.body) {
                     collectFromStatement(bodyStmt, lambdaBodyScope)

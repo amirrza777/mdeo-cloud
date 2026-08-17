@@ -116,13 +116,7 @@ export interface SerializedClipboardNode {
  * a nested node, a reference, or {@code null}.
  */
 export type SerializedClipboardEntry =
-    | string
-    | number
-    | boolean
-    | null
-    | SerializedClipboardNode
-    | ClipboardReference
-    | ClipboardMultiReference;
+    string | number | boolean | null | SerializedClipboardNode | ClipboardReference | ClipboardMultiReference;
 
 /**
  * A serialized single reference.

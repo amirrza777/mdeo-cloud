@@ -22,9 +22,11 @@ function createCsvPlugin(): LangiumLanguagePlugin<ExternalReferenceAdditionalSer
                 ExternalReferenceCollector: () => new DefaultExternalReferenceCollector()
             },
             lsp: {
-                Formatter: (services: LanguageServices & ExternalReferenceAdditionalServices) => new SerializerFormatter(services)
+                Formatter: (services: LanguageServices & ExternalReferenceAdditionalServices) =>
+                    new SerializerFormatter(services)
             },
-            AstSerializer: (services: LanguageServices & ExternalReferenceAdditionalServices) => new DefaultAstSerializer(services)
+            AstSerializer: (services: LanguageServices & ExternalReferenceAdditionalServices) =>
+                new DefaultAstSerializer(services)
         },
         postCreate(services: LanguageServices & ExternalReferenceAdditionalServices) {
             registerDefaultTokenSerializers(services);
@@ -33,7 +35,10 @@ function createCsvPlugin(): LangiumLanguagePlugin<ExternalReferenceAdditionalSer
 }
 
 export const csvPluginProvider: LangiumLanguagePluginProvider<ExternalReferenceAdditionalServices> = {
-    create(_contributionPlugins: ServerContributionPlugin[], _languageJsUrl?: string): LangiumLanguagePlugin<ExternalReferenceAdditionalServices> {
+    create(
+        _contributionPlugins: ServerContributionPlugin[],
+        _languageJsUrl?: string
+    ): LangiumLanguagePlugin<ExternalReferenceAdditionalServices> {
         return createCsvPlugin();
     }
 };

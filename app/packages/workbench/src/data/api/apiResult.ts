@@ -61,12 +61,7 @@ export enum ExecutionErrorCode {
  * Union of all possible error codes.
  */
 export type ApiErrorCode =
-    | CommonErrorCode
-    | FileSystemErrorCode
-    | ProjectErrorCode
-    | PluginErrorCode
-    | FileDataErrorCode
-    | ExecutionErrorCode;
+    CommonErrorCode | FileSystemErrorCode | ProjectErrorCode | PluginErrorCode | FileDataErrorCode | ExecutionErrorCode;
 
 /**
  * Base interface for API errors.

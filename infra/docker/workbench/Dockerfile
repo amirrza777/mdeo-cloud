@@ -1,5 +1,5 @@
 # Workbench builder
-FROM node:22-alpine AS workbench-builder
+FROM node:24-alpine AS workbench-builder
 
 WORKDIR /build
 COPY app/ ./

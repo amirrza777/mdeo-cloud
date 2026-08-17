@@ -5,10 +5,7 @@
         <template v-for="embed in resolvedEmbeds" :key="embed.id">
             <Teleport :to="`#${embed.id}`" v-if="embed.mounted">
                 <div class="my-6 rounded-lg border overflow-hidden">
-                    <div
-                        class="flex items-center bg-muted/50 px-4 py-2"
-                        :class="{ 'border-b': !embed.collapsed }"
-                    >
+                    <div class="flex items-center bg-muted/50 px-4 py-2" :class="{ 'border-b': !embed.collapsed }">
                         <button
                             class="flex-1 min-w-0 inline-flex items-center gap-2 text-left"
                             @click="embed.collapsed = !embed.collapsed"
