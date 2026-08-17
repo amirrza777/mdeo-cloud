@@ -112,8 +112,7 @@ export class MetamodelCodeActionProvider implements CodeActionProvider {
             return undefined;
         }
         return AstUtils.getContainerOfType(leaf.astNode, (n) => this.reflection.isInstance(n, Association)) as
-            | AssociationType
-            | undefined;
+            AssociationType | undefined;
     }
 
     /**

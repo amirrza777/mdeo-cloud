@@ -352,7 +352,9 @@ export function generateModelContributionGrammar(
     for (const imp of plugin.imports) {
         const contentRule = ruleMap.get(imp.ruleName);
         if (contentRule == undefined) {
-            throw new Error(`Import '${imp.name}' in plugin '${plugin.id}' references rule '${imp.ruleName}' which does not exist.`);
+            throw new Error(
+                `Import '${imp.name}' in plugin '${plugin.id}' references rule '${imp.ruleName}' which does not exist.`
+            );
         }
 
         const contentInterface = interfaceMap.get(imp.interfaceName);

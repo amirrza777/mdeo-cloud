@@ -1,12 +1,12 @@
-import type { ValidationAcceptor, ValidationChecks, AstNode, ServiceRegistry, ValidationRegistry } from "langium";
+import type { ValidationAcceptor, ValidationChecks, AstNode, ServiceRegistry } from "langium";
 import type { LangiumCoreServices } from "langium";
-import { sharedImport } from "@mdeo/language-shared";
+import { runContributedValidations, sharedImport } from "@mdeo/language-shared";
 import type { ConfigContributionPlugin } from "../plugin/configContributionPlugin.js";
 import type { ResolvedConfigContributionPlugins, SectionNamingInfo } from "../plugin/resolvePlugins.js";
 import type { ConfigType, BaseConfigSectionType } from "../grammar/configTypes.js";
 import { getServicesByLanguageId } from "@mdeo/language-common";
 
-const { MultiMap, Cancellation } = sharedImport("langium");
+const { MultiMap } = sharedImport("langium");
 
 /**
  * Interface mapping for config AST types used in validation checks.
@@ -113,7 +113,7 @@ export class ConfigValidator {
             return;
         }
 
-        this.runPluginValidationsRecursively(contentNode, pluginServices.validation.ValidationRegistry, accept);
+        runContributedValidations(contentNode, pluginServices.validation.ValidationRegistry, accept);
     }
 
     /**
@@ -257,54 +257,5 @@ export class ConfigValidator {
                 node: executable.section
             });
         }
-    }
-
-    /**
-     * Runs all registered fast-category validation checks from a plugin's ValidationRegistry
-     * against the given node and all its descendants.
-     *
-     * @param node The root AST node to validate
-     * @param registry The plugin's ValidationRegistry
-     * @param accept The validation acceptor
-     */
-    private runPluginValidationsRecursively(
-        node: AstNode,
-        registry: ValidationRegistry,
-        accept: ValidationAcceptor
-    ): void {
-        const checks = registry.getChecks(node.$type);
-        for (const check of checks) {
-            void check(node, accept, Cancellation.CancellationToken.None);
-        }
-
-        for (const child of this.getChildren(node)) {
-            this.runPluginValidationsRecursively(child, registry, accept);
-        }
-    }
-
-    /**
-     * Returns the direct AST children of a node by iterating all array and object properties.
-     *
-     * @param node The AST node to get children for
-     * @returns An iterable of direct child AST nodes
-     */
-    private getChildren(node: AstNode): AstNode[] {
-        const children: AstNode[] = [];
-        for (const key of Object.keys(node)) {
-            if (key.startsWith("$")) {
-                continue;
-            }
-            const value = (node as unknown as Record<string, unknown>)[key];
-            if (Array.isArray(value)) {
-                for (const item of value) {
-                    if (item != null && typeof item === "object" && "$type" in item) {
-                        children.push(item as AstNode);
-                    }
-                }
-            } else if (value != null && typeof value === "object" && "$type" in value) {
-                children.push(value as AstNode);
-            }
-        }
-        return children;
     }
 }

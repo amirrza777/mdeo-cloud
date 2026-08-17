@@ -27,11 +27,6 @@
             "path": "../service-model-common"
         }
     ],
-    "include": [
-        "src/**/*.ts"
-    ],
-    "exclude": [
-        "dist",
-        "node_modules"
-    ]
+    "include": ["src/**/*.ts"],
+    "exclude": ["dist", "node_modules"]
 }

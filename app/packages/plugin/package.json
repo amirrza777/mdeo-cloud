@@ -25,7 +25,7 @@
     ],
     "dependencies": {},
     "devDependencies": {
-        "@lucide/vue": "^1.29.0",
+        "@lucide/vue": "^1.31.0",
         "monaco-editor": "npm:@codingame/monaco-vscode-editor-api@^25.0.1"
     }
 }

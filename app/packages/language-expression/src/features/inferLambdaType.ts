@@ -52,9 +52,7 @@ export interface LambdaTypeInferenceParametersOnly {
  * or an inference problem if inference is not possible.
  */
 export type LambdaTypeInferenceResult<Specifics extends TypirLangiumSpecifics> =
-    | LambdaTypeInferenceComplete
-    | LambdaTypeInferenceParametersOnly
-    | InferenceProblem<Specifics>[];
+    LambdaTypeInferenceComplete | LambdaTypeInferenceParametersOnly | InferenceProblem<Specifics>[];
 
 /**
  * Infers the type of a lambda expression based on its context.

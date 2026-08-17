@@ -15,11 +15,8 @@ two hundred hand-written objects.
 | **Source** | `app/packages/service-model-csv`, `app/packages/language-model-csv` |
 | **Depends on** | The [Model](/plugins/model) and [Metamodel](/plugins/metamodel) plugins; the data files are usually [CSV](/plugins/csv) files |
 
-::: warning Only started by the development compose file
-`infra/docker-compose-dev.yaml` builds this service and lists it in `DEFAULT_PLUGIN_URLS`.
-`docker-compose.yaml` and `docker-compose-prod.yaml` do not, so a production deployment has to add
-the service and register `/plugin/model-csv` itself.
-:::
+Started and registered by every deployment — all three compose files and the Terraform stack — like
+the other bundled plugins.
 
 ## Languages contributed
 
@@ -62,13 +59,53 @@ metamodel named by `using`, so it is completed and validated in the editor like 
 
 The same class may be imported from several files; the rows are appended.
 
-## How rows become objects
+### Naming columns explicitly
 
-The rules below are applied by the plugin's request handler when the model service computes the
-model's data.
+By default a column is used when its name matches a property of the class. When the CSV's headers do
+not match — a spreadsheet you do not control, a column named `Due Date`, a file whose columns you
+want to use only some of — an entry can name the mapping itself, in a nested block.
+
+This is the [walkthrough's](/guide/walkthrough) plan, taken from CSV instead of written by hand:
+
+<<< @/../samples/task-allocation/plan-from-csv.m{mdeo-model}
+
+against these two files:
+
+<<< @/../samples/task-allocation/developers.csv{csv}
+
+<<< @/../samples/task-allocation/tasks.csv{csv}
+
+`Developer`'s headers already match its properties, so it needs no block. `Task`'s do not, so each
+column is named — including `Estimated effort`, which maps onto a property `Task` inherits from
+`WorkItem`, and `Assigned to`, which maps onto an association end and so becomes a link.
+
+The left side is the CSV column, quoted because it is arbitrary text; the right side is the property
+name, a bare identifier.
+
+::: warning Property names here are not cross-references
+Unlike the class name on the line above it, the property name is plain text: it gets no completion,
+and a typo is not underlined in the editor. It is checked when the import is computed, and a name
+that is not a property of the class becomes one of the warnings below — which nothing surfaces yet.
+Until it does, a mistyped property silently produces objects with that value missing.
+:::
+
+An explicit mapping is a complete list, not an override: when one is given, **only** the columns it
+names are read. That is also how a column is deliberately left out — omit it, and it is ignored
+rather than warned about. Leave the block off entirely to go back to matching by name.
+
+| | Columns read | Unlisted columns |
+| --- | --- | --- |
+| No mapping block | Every column whose name matches a property | Ignored, with a warning |
+| Mapping block | Only the columns the block names | Ignored, silently |
+
+## How rows become objects
 
 **One row, one object.** The header row names properties of the class; each following row becomes one
 object. Objects are named `<Class>_<n>`, numbered from zero across all files importing that class.
+
+**Inherited properties count.** A column may name a property the class inherits from a superclass,
+not only one declared on the class itself. The whole `extends` chain is flattened before columns are
+matched, and a property redeclared further down the chain wins.
 
 **Values are converted to the declared type.** A cell is read according to the property's type in the
 metamodel:
@@ -83,8 +120,8 @@ metamodel:
 
 An empty cell becomes `null`.
 
-**References use the `_id` column.** A reference column holds the `_id` value of the target row, and
-several targets are separated by `;`:
+**References use the `_id` column.** A column named after an association end becomes a link rather
+than a value. It holds the `_id` of the target row, and several targets are separated by `;`:
 
 ```csv
 _id,name,assignee
@@ -92,7 +129,13 @@ t1,Design,e1
 t2,Build,e1;e2
 ```
 
-`_id` is only a lookup key for the import — it does not become a property of the object.
+`_id` is only a lookup key for the import — it does not become a property of the object. The target
+`_id` is looked up among the rows imported for the class the association points at, so both ends have
+to be imported for the link to resolve.
+
+Association ends are read from the metamodel's `Association` declarations, on the class and on
+everything it extends — the same view of a class the [Metamodel plugin](/plugins/metamodel) gives the
+rest of the platform, so a column resolves here exactly when the property exists there.
 
 **Problems are warnings, not errors.** The import never fails, it records what it could not do:
 
@@ -108,6 +151,40 @@ t2,Build,e1;e2
 The warnings travel back to the model service in the `warnings` field of the response, but nothing
 surfaces them yet — a malformed row currently shows up as a missing or oddly-valued object rather
 than as a message in the editor.
+
+## On the diagram
+
+Imported objects are drawn in the model's diagram editor alongside the hand-written ones, using the
+same node shape and showing the same properties. Two things distinguish them:
+
+- **Their properties are read-only.** A hand-written object's labels can be edited in place and the
+  edit is written back to the `.m` file. An imported object has no text to write back to, so its
+  labels are not editable — change the CSV instead.
+- **Their positions are remembered anyway.** Dragging an imported node persists its position across
+  reloads, even though it has no AST node of its own to attach layout metadata to.
+
+Node ids are derived from the object's name, so a node keeps its position as long as its row keeps
+its position in the file. Inserting a row above it renumbers the objects after it, and their layout
+follows the name rather than the row.
+
+This rendering happens in the workbench, in the plugin's own diagram service — the model language
+does not know CSV exists. See [The extension model](/develop/) for how a contribution plugin supplies
+its own diagram nodes.
+
+### This plugin needs the CSV plugin
+
+Files are read through the workspace, which resolves them by extension — so reading a `.csv` needs a
+plugin that registers a language for `.csv`, and that is the [CSV plugin](/plugins/csv). This plugin
+does not pull it in, so a project can end up with `import CSV` available and nothing able to open
+what it points at.
+
+When that happens the import reports it as an ordinary error on the file reference:
+
+> No enabled plugin can read '.csv' files, so this import cannot be resolved. Enable the CSV plugin
+> for this project to import '.csv' data.
+
+Enable the CSV plugin under **Settings → Plugins** and it resolves. With both enabled, editing a CSV
+re-renders the diagram immediately.
 
 ## Server-side capabilities
 

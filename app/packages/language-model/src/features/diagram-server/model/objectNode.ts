@@ -19,8 +19,14 @@ export class GObjectNode extends GNode {
     /**
      * The class hierarchy of this instance (class name and all superclass names).
      * Used by the client to validate canConnect against association source/target classes.
+     *
+     * Left undefined when the hierarchy is not known — an unresolved class, or a
+     * contribution plugin that does not report one. It must not default to an
+     * empty array: the client treats "defined but empty" as a hierarchy that
+     * matches nothing and refuses every connection, whereas undefined means
+     * "unknown, do not validate".
      */
-    classHierarchy: string[] = [];
+    classHierarchy?: string[];
 
     /**
      * Creates a builder for GObjectNode instances.
@@ -62,10 +68,11 @@ export class GObjectNodeBuilder<T extends GObjectNode = GObjectNode> extends GNo
     /**
      * Sets the class hierarchy of the object instance.
      *
-     * @param hierarchy Array of class names from the instance class up through its superclasses
+     * @param hierarchy Array of class names from the instance class up through its superclasses,
+     *   or undefined when the hierarchy is unknown and connections should not be validated
      * @returns This builder for chaining
      */
-    classHierarchy(hierarchy: string[]): this {
+    classHierarchy(hierarchy: string[] | undefined): this {
         this.proxy.classHierarchy = hierarchy;
         return this;
     }

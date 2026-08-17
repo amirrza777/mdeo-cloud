@@ -146,10 +146,7 @@ export abstract class MetadataManager<T extends AstNode = AstNode> {
 
         Object.assign(resultEdges, loopEdges);
 
-        return {
-            nodes: resultNodes,
-            edges: resultEdges
-        };
+        return this.completeMetadata({ nodes: resultNodes, edges: resultEdges }, newMetadata, mergedMetadata);
     }
 
     /**
@@ -397,6 +394,12 @@ export abstract class MetadataManager<T extends AstNode = AstNode> {
      * Nodes that became unstable for other reasons do not cause their
      * neighbours to be evicted in turn.
      *
+     * An edge is considered stable as soon as one of its endpoints is stable,
+     * which by the definition above implies that the edge itself exists in both
+     * graphs. The pruned graphs consequently contain exactly the edges between
+     * two evicted nodes, so every edge of either graph ends up in exactly one of
+     * the two categories.
+     *
      * @param currentGraph The current graph.
      * @param newGraph The new graph.
      * @returns Pruned graph copies, the set of stable node IDs, and the list
@@ -426,9 +429,18 @@ export abstract class MetadataManager<T extends AstNode = AstNode> {
             }
         }
 
+        /*
+         * One stable endpoint is enough to consider an edge stable: a node only becomes stable
+         * when every one of its incident edges has a counterpart with the same key and type in
+         * the other graph, so an edge touching a stable node is guaranteed to exist in both
+         * graphs and can be matched with itself. Requiring two stable endpoints here would lose
+         * such an edge entirely, because the pruned graphs below only receive edges whose two
+         * endpoints were both evicted - it would appear in no edit path, so neither could its
+         * layout be carried over nor could the new edge be given any metadata at all.
+         */
         const stableEdges: Array<EdgeTuple> = [];
         for (const [from, to, key] of currentGraph.edges) {
-            if (stableNodeIds.has(from) && stableNodeIds.has(to)) {
+            if (stableNodeIds.has(from) || stableNodeIds.has(to)) {
                 stableEdges.push([from, to, key]);
             }
         }
@@ -610,6 +622,12 @@ export abstract class MetadataManager<T extends AstNode = AstNode> {
             if (e2 != null) {
                 const [, , id2] = e2;
                 const newEdgeMeta = newMetadata.edges[id2 as string];
+                // A pre-matched edge is taken from the current graph, so guard against an entry
+                // that the freshly extracted metadata does not know: writing one would produce an
+                // entry without a type and without endpoints.
+                if (newEdgeMeta == undefined) {
+                    continue;
+                }
 
                 let candidateMeta: EdgeMetadata;
                 if (e1 != null) {
@@ -617,7 +635,7 @@ export abstract class MetadataManager<T extends AstNode = AstNode> {
                     const oldEdgeMeta = currentMetadata.edges[id1 as string];
                     candidateMeta = {
                         ...newEdgeMeta,
-                        meta: oldEdgeMeta.meta
+                        meta: oldEdgeMeta?.meta
                     };
                 } else {
                     candidateMeta = newEdgeMeta;
@@ -641,6 +659,7 @@ export abstract class MetadataManager<T extends AstNode = AstNode> {
      * For each node and edge in `newMetadata`, the layout metadata from
      * `mergedMetadata` is carried over when an entry with the same ID exists.
      * Entries with no existing counterpart receive defaults via {@link verifyMetadata}.
+     * This is {@link completeMetadata} starting from nothing.
      *
      * @param newMetadata The freshly extracted graph metadata (positions absent).
      * @param mergedMetadata The merged current+last-valid metadata used as the
@@ -648,20 +667,52 @@ export abstract class MetadataManager<T extends AstNode = AstNode> {
      * @returns A new {@link GraphMetadata} with layout metadata carried over where possible.
      */
     private applyDefaultMetadata(newMetadata: GraphMetadata, mergedMetadata: GraphMetadata): GraphMetadata {
-        const nodes: Record<string, NodeMetadata> = {};
+        return this.completeMetadata({ nodes: {}, edges: {} }, newMetadata, mergedMetadata);
+    }
+
+    /**
+     * Completes a partially resolved result so that it covers every node and edge of the freshly
+     * extracted metadata, carrying existing layout over by ID and falling back to
+     * {@link verifyMetadata} for defaults.
+     *
+     * This is what keeps a single unresolved element from disabling metadata handling for the rest
+     * of the session: an edit path does not have to mention every element (an edge can be matched
+     * on neither side, and a language's {@link verifyMetadata} may have no opinion about a type at
+     * all), while {@link isMetadataValid} demands metadata for all of them. Without the completion
+     * below, one uncovered element would make the cheap validation path fail for good and send
+     * every following model update through the full graph edit distance computation again, which in
+     * turn is free to reshuffle the layout that was already there.
+     *
+     * @param result The metadata resolved so far, e.g. from the edit paths.
+     * @param newMetadata The freshly extracted graph metadata (layout absent).
+     * @param existingMetadata The metadata to take existing layout from.
+     * @returns A {@link GraphMetadata} covering exactly the elements of `newMetadata`.
+     */
+    private completeMetadata(
+        result: GraphMetadata,
+        newMetadata: GraphMetadata,
+        existingMetadata: GraphMetadata
+    ): GraphMetadata {
+        const nodes: Record<string, NodeMetadata> = { ...result.nodes };
         for (const [id, newNode] of Object.entries(newMetadata.nodes)) {
-            const existingMeta = mergedMetadata.nodes[id]?.meta;
-            const candidate: NodeMetadata = { ...newNode, meta: existingMeta };
-            const correction = this.verifyMetadata(candidate);
-            nodes[id] = { ...newNode, meta: correction ?? existingMeta };
+            if (nodes[id]?.meta != undefined) {
+                continue;
+            }
+            const existingMeta = nodes[id]?.meta ?? existingMetadata.nodes[id]?.meta;
+            const correction = this.verifyMetadata({ ...newNode, meta: existingMeta });
+            nodes[id] = { ...newNode, meta: correction ?? existingMeta ?? {} };
         }
-        const edges: Record<string, EdgeMetadata> = {};
+
+        const edges: Record<string, EdgeMetadata> = { ...result.edges };
         for (const [id, newEdge] of Object.entries(newMetadata.edges)) {
-            const existingMeta = mergedMetadata.edges[id]?.meta;
-            const candidate: EdgeMetadata = { ...newEdge, meta: existingMeta };
-            const correction = this.verifyMetadata(candidate);
-            edges[id] = { ...newEdge, meta: correction ?? existingMeta };
+            if (edges[id]?.meta != undefined) {
+                continue;
+            }
+            const existingMeta = edges[id]?.meta ?? existingMetadata.edges[id]?.meta;
+            const correction = this.verifyMetadata({ ...newEdge, meta: existingMeta });
+            edges[id] = { ...newEdge, meta: correction ?? existingMeta ?? {} };
         }
+
         return { nodes, edges };
     }
 

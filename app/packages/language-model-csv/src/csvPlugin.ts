@@ -31,6 +31,7 @@ import {
 import { Class } from "@mdeo/language-metamodel";
 import { createModelCsvContributionPlugin } from "./plugin/modelCsvContributionPlugin.js";
 import { CsvDiagramContribution } from "./features/csvDiagramContribution.js";
+import { registerCsvImportValidationChecks } from "./validation/csvImportValidator.js";
 
 /**
  * Combined services type for the standalone model-csv language.
@@ -48,7 +49,11 @@ export type ModelCsvServices = ExternalReferenceAdditionalServices &
  * Provides the external interface types and common terminals so the CSV
  * grammar can be deserialized from its serialized form.
  */
-const csvDeserializationContext = GrammarDeserializationContext.create([Class], [], [ID, NEWLINE, HIDDEN_NEWLINE, INT, FLOAT, STRING]);
+const csvDeserializationContext = GrammarDeserializationContext.create(
+    [Class],
+    [],
+    [ID, NEWLINE, HIDDEN_NEWLINE, INT, FLOAT, STRING]
+);
 
 /**
  * The root rule for the standalone model-csv language.
@@ -90,6 +95,7 @@ const modelCsvPlugin: LangiumLanguagePlugin<ModelCsvServices> = {
     },
     postCreate(services) {
         registerDefaultTokenSerializers(services);
+        registerCsvImportValidationChecks(services);
         addExternalReferenceCollectionPhase(services);
     }
 };

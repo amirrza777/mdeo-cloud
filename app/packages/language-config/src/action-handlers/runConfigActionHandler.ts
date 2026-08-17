@@ -53,8 +53,7 @@ export class RunConfigActionHandler implements ActionHandler {
         }
 
         const pluginServices = getServicesByLanguageId(this.serviceRegistry, executableInfo.plugin.languageKey) as
-            | (LangiumCoreServices & Partial<ActionHandlerRegistryAdditionalServices>)
-            | undefined;
+            (LangiumCoreServices & Partial<ActionHandlerRegistryAdditionalServices>) | undefined;
         const handler = pluginServices?.action?.ActionHandlerRegistry?.getHandler("run");
         if (handler == undefined) {
             return {
@@ -87,8 +86,7 @@ export class RunConfigActionHandler implements ActionHandler {
         }
 
         const pluginServices = getServicesByLanguageId(this.serviceRegistry, executableInfo.plugin.languageKey) as
-            | (LangiumCoreServices & Partial<ActionHandlerRegistryAdditionalServices>)
-            | undefined;
+            (LangiumCoreServices & Partial<ActionHandlerRegistryAdditionalServices>) | undefined;
         const handler = pluginServices?.action?.ActionHandlerRegistry?.getHandler("run");
         if (handler == undefined) {
             return {

@@ -72,11 +72,7 @@ function createModelPlugin(
         additionalTerminals: ModelTerminals,
         module: {
             parser: {
-                TokenBuilder: () => new NewlineAwareTokenBuilder(
-                    new Set(["{"]),
-                    new Set(["("]),
-                    new Set(["}", ")"])
-                ),
+                TokenBuilder: () => new NewlineAwareTokenBuilder(new Set(["{"]), new Set(["("]), new Set(["}", ")"])),
                 ValueConverter: () => new IdValueConverter(),
                 ParserConfig: () => ({
                     maxLookahead: 4

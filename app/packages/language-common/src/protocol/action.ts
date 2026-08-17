@@ -12,16 +12,7 @@ export type ActionIconNode = [string, Record<string, string>][];
  * Based on a simplified JSON Type Definition (RFC 8927) without timestamp support.
  */
 export type ActionSchemaPrimitiveType =
-    | "int8"
-    | "int16"
-    | "int32"
-    | "uint8"
-    | "uint16"
-    | "uint32"
-    | "float32"
-    | "float64"
-    | "string"
-    | "boolean";
+    "int8" | "int16" | "int32" | "uint8" | "uint16" | "uint32" | "float32" | "float64" | "string" | "boolean";
 
 /**
  * Schema form representing a primitive type.

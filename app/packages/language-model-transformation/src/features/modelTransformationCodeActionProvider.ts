@@ -106,8 +106,7 @@ export class ModelTransformationCodeActionProvider implements CodeActionProvider
             return undefined;
         }
         return AstUtils.getContainerOfType(leaf.astNode, (n) => this.reflection.isInstance(n, PatternLink)) as
-            | PatternLinkType
-            | undefined;
+            PatternLinkType | undefined;
     }
 
     /**

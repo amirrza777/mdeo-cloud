@@ -327,17 +327,21 @@ fun unaryExpr(
  * @param parameters List of parameter names for the lambda.
  * @param body The statements in the lambda body.
  * @param lambdaTypeIndex The index of the lambda type in the types array.
+ * @param hasBlockBody Whether the body is the lambda's own block rather than a synthetic wrapper
+ *                     around an expression body.
  * @return The lambda expression.
  */
 fun lambdaExpr(
     parameters: List<String>,
     body: List<TypedStatement>,
-    lambdaTypeIndex: Int
+    lambdaTypeIndex: Int,
+    hasBlockBody: Boolean = true
 ): TypedLambdaExpression {
     return TypedLambdaExpression(
         evalType = lambdaTypeIndex,
         parameters = parameters,
-        body = TypedCallableBody(body)
+        body = TypedCallableBody(body),
+        hasBlockBody = hasBlockBody
     )
 }
 

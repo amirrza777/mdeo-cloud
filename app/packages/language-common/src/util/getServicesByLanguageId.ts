@@ -13,6 +13,9 @@ import type { LangiumCoreServices, ServiceRegistry } from "langium";
  * @param languageId The target plugin's language ID (its `languageKey`)
  * @returns The plugin's language services, or undefined if none is registered under that ID
  */
-export function getServicesByLanguageId(registry: ServiceRegistry, languageId: string): LangiumCoreServices | undefined {
+export function getServicesByLanguageId(
+    registry: ServiceRegistry,
+    languageId: string
+): LangiumCoreServices | undefined {
     return registry.all.find((services) => services.LanguageMetaData.languageId === languageId);
 }

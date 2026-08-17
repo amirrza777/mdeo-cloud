@@ -93,7 +93,13 @@ import CSV {
 ```
 
 so that the rows of a [CSV file](/plugins/csv) become objects of the named metamodel class. Imported
-objects are merged with the hand-written ones before the model is handed to the execution services.
+objects are merged with the hand-written ones before the model is handed to the execution services,
+and are drawn in the diagram next to them.
+
+Nothing in this plugin knows what CSV is. An import contribution supplies its own grammar for the
+block's contents, its own answer to "what objects does this stand for", and — optionally — its own
+diagram nodes; the model language matches the block to whichever plugin registered its keyword and
+asks that plugin. A second import format would need no change here.
 
 ## Server-side capabilities
 

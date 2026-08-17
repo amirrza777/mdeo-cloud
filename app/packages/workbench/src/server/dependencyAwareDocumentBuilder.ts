@@ -13,6 +13,7 @@ import type {
     ExtendedDocumentBuilder,
     ExternalReferenceCollector
 } from "@mdeo/language-common";
+import { getServicesByLanguageId } from "@mdeo/language-common";
 
 /**
  * A document builder that tracks external reference dependencies and uses them
@@ -213,9 +214,9 @@ export class DependencyAwareDocumentBuilder extends DefaultDocumentBuilder imple
      * @returns The collector, or `undefined` if the language contributes none
      */
     private getExternalReferenceCollector(document: LangiumDocument): ExternalReferenceCollector | undefined {
-        const languageId = document.textDocument.languageId;
-        const langServices = this.sharedServices.ServiceRegistry.all.find(
-            (s) => s.LanguageMetaData.languageId === languageId
+        const langServices = getServicesByLanguageId(
+            this.sharedServices.ServiceRegistry,
+            document.textDocument.languageId
         ) as (LangiumCoreServices & Partial<ExternalReferenceAdditionalServices>) | undefined;
         return langServices?.references?.ExternalReferenceCollector;
     }

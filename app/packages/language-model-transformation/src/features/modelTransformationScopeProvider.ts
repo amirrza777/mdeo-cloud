@@ -302,16 +302,12 @@ export class ModelTransformationLangiumScopeProvider extends DefaultScopeProvide
     private getPropertyNameScope(referenceInfo: ReferenceInfo): Scope {
         const propertyAssignment = referenceInfo.container as PatternPropertyAssignmentType;
         let objectInstance = propertyAssignment.$container as
-            | PatternObjectInstanceType
-            | PatternObjectInstanceReferenceType
-            | undefined;
+            PatternObjectInstanceType | PatternObjectInstanceReferenceType | undefined;
 
         // workaround for langium weirdness in completion mode
         if (this.astReflection.isInstance(objectInstance, PatternPropertyAssignment)) {
             objectInstance = objectInstance.$container as
-                | PatternObjectInstanceType
-                | PatternObjectInstanceReferenceType
-                | undefined;
+                PatternObjectInstanceType | PatternObjectInstanceReferenceType | undefined;
         }
 
         if (objectInstance == undefined) {

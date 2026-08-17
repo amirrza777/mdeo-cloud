@@ -142,8 +142,7 @@ useEventListener(
  */
 function getSelectedText(): string | undefined {
     const editor = props.workbenchState.monacoApi.editorService.activeTextEditorControl as
-        | monacoType.editor.ICodeEditor
-        | undefined;
+        monacoType.editor.ICodeEditor | undefined;
     const selection = editor?.getSelection?.();
     const model = editor?.getModel?.();
 

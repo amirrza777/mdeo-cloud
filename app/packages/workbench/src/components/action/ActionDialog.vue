@@ -112,8 +112,7 @@ async function startActionDialog(params: { type: string; languageId: string; dat
 
     try {
         const response = (await languageClient.value?.sendRequest(ActionProtocol.ActionStartRequest, params)) as
-            | ActionStartResponse
-            | undefined;
+            ActionStartResponse | undefined;
 
         if (response) {
             if (response.kind === "completion") {

@@ -15,10 +15,16 @@ turns that data into model objects.
 | **Source** | `app/packages/service-csv`, `app/packages/language-csv` |
 | **Depends on** | Nothing. It parses no references and needs no other plugin |
 
-::: warning Only started by the development compose file
-`infra/docker-compose-dev.yaml` builds this service and lists it in `DEFAULT_PLUGIN_URLS`.
-`docker-compose.yaml` and `docker-compose-prod.yaml` do not, so a production deployment has to add
-the service and register `/plugin/csv` itself.
+Started and registered by every deployment — all three compose files and the Terraform stack — like
+the other bundled plugins.
+
+::: tip Pairs with Model CSV
+On its own this plugin only gives `.csv` files an editor. Turning their rows into model objects is
+the [Model CSV plugin](/plugins/model-csv), which reads the files a model's `import CSV` block names.
+
+Enabling this one alone is fine — data files in a project without imports. The other direction is
+not: Model CSV reads files through this plugin's language and
+[reports an error](/plugins/model-csv#this-plugin-needs-the-csv-plugin) if it is missing.
 :::
 
 ## Languages contributed
@@ -48,8 +54,8 @@ the metamodel class the rows are mapped to.
 
 ### The expected shape of the data
 
-Nothing enforces this, but a file only imports cleanly if it follows the convention the
-[Model CSV plugin](/plugins/model-csv) reads:
+Nothing enforces this, but the simplest file to import is one whose headers already match the
+metamodel class the [Model CSV plugin](/plugins/model-csv) maps it to:
 
 ```csv
 _id,name,effort,assignee
@@ -62,8 +68,12 @@ t2,Build,8,e2
 | `_id` | Optional row identifier, used as the target of references from other rows |
 | any other | A property of the metamodel class the file is mapped to |
 
-The parser used on import accepts quoted fields, escaped quotes (`""`) and both `\n` and `\r\n` line
-endings.
+Headers that do not match are not a problem — the import can
+[name the mapping explicitly](/plugins/model-csv#naming-columns-explicitly), which is what you want
+for a file exported from somewhere you do not control.
+
+The parser used on import accepts quoted fields, escaped quotes (`""`), embedded commas and newlines
+inside quotes, and both `\n` and `\r\n` line endings. Blank lines are skipped.
 
 ## Contribution plugins contributed
 
