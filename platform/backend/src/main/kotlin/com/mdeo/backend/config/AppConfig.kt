@@ -108,7 +108,9 @@ data class AppConfig(
                     maxPushPackSizeBytes = System.getenv("GIT_MAX_PUSH_PACK_SIZE_BYTES")?.toLongOrNull()
                         ?: (100L * 1024 * 1024),
                     maxProjectStorageBytes = System.getenv("GIT_MAX_PROJECT_STORAGE_BYTES")?.toLongOrNull()
-                        ?: (2L * 1024 * 1024 * 1024)
+                        ?: (2L * 1024 * 1024 * 1024),
+                    sshPort = System.getenv("GIT_SSH_PORT")?.toIntOrNull() ?: 2222,
+                    sshHostKey = System.getenv("GIT_SSH_HOST_KEY")
                 )
             )
         }
@@ -225,8 +227,16 @@ data class FileDataConfig(
  *   rejected push already wrote except the sweep this cap's own rejection triggers, so without
  *   it a write-capable user could otherwise grow the database without bound by pushing large
  *   rejected packs in a loop.
+ * @property sshPort Port the git-over-SSH server listens on (default 2222; not the standard 22,
+ *   so a client needs an explicit port in its clone URL or SSH client config).
+ * @property sshHostKey The SSH server's host key, as the literal contents of an OpenSSH-format
+ *   private key file (what `ssh-keygen -t ed25519 -f hostkey` produces) - optional, an ephemeral
+ *   key is generated at startup if not provided. A generated key changes on every restart, so
+ *   clients see a new host-key warning each time; set this in any environment where that matters.
  */
 data class GitConfig(
     val maxPushPackSizeBytes: Long,
-    val maxProjectStorageBytes: Long
+    val maxProjectStorageBytes: Long,
+    val sshPort: Int,
+    val sshHostKey: String? = null
 )

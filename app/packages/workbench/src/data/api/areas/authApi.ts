@@ -36,6 +36,17 @@ export interface PersonalAccessTokenCreated {
 }
 
 /**
+ * A registered SSH public key's metadata.
+ */
+export interface SshPublicKeyInfo {
+    id: string;
+    name: string;
+    fingerprint: string;
+    createdAt: string;
+    lastUsedAt: string | null;
+}
+
+/**
  * API for authentication operations including login, logout, registration,
  * and password management.
  */
@@ -245,6 +256,83 @@ export class AuthApi {
                     return ApiResult.commonFailure(CommonErrorCode.Unknown, "Token not found");
                 }
                 return ApiResult.commonFailure(CommonErrorCode.Unavailable, "Failed to revoke token");
+            }
+
+            return ApiResult.success(undefined);
+        } catch (error) {
+            return ApiResult.commonFailure(CommonErrorCode.Unavailable, String(error));
+        }
+    }
+
+    /**
+     * Registers a new SSH public key for the current user.
+     *
+     * @param name A label to tell this key apart from others later
+     * @param publicKey The full authorized_keys-format line
+     * @returns A promise resolving to the registered key or an error
+     */
+    async addSshKey(name: string, publicKey: string): Promise<ApiResult<SshPublicKeyInfo, CommonError>> {
+        try {
+            const response = await fetch(`${this.core.baseUrl}/ssh-keys`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ name, publicKey })
+            });
+
+            if (!response.ok) {
+                const data = await response.json().catch(() => undefined);
+                return ApiResult.commonFailure(CommonErrorCode.Unknown, data?.error ?? "Failed to add key");
+            }
+
+            const data = await response.json();
+            return ApiResult.success(data);
+        } catch (error) {
+            return ApiResult.commonFailure(CommonErrorCode.Unavailable, String(error));
+        }
+    }
+
+    /**
+     * Lists the current user's own registered SSH public keys.
+     *
+     * @returns A promise resolving to the list of keys or an error
+     */
+    async listSshKeys(): Promise<ApiResult<SshPublicKeyInfo[], CommonError>> {
+        try {
+            const response = await fetch(`${this.core.baseUrl}/ssh-keys`, {
+                method: "GET",
+                credentials: "include"
+            });
+
+            if (!response.ok) {
+                return ApiResult.commonFailure(CommonErrorCode.Unavailable, "Failed to list keys");
+            }
+
+            const data = await response.json();
+            return ApiResult.success(data);
+        } catch (error) {
+            return ApiResult.commonFailure(CommonErrorCode.Unavailable, String(error));
+        }
+    }
+
+    /**
+     * Removes one of the current user's own registered SSH public keys.
+     *
+     * @param keyId The key to remove
+     * @returns A promise resolving to success or an error
+     */
+    async removeSshKey(keyId: string): Promise<ApiResult<void, CommonError>> {
+        try {
+            const response = await fetch(`${this.core.baseUrl}/ssh-keys/${keyId}`, {
+                method: "DELETE",
+                credentials: "include"
+            });
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    return ApiResult.commonFailure(CommonErrorCode.Unknown, "Key not found");
+                }
+                return ApiResult.commonFailure(CommonErrorCode.Unavailable, "Failed to remove key");
             }
 
             return ApiResult.success(undefined);
