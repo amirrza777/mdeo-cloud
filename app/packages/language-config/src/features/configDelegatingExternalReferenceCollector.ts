@@ -6,7 +6,7 @@ import type {
 } from "@mdeo/language-common";
 import type { LangiumDocument, URI } from "langium";
 import type { ResolvedConfigContributionPlugins } from "../plugin/resolvePlugins.js";
-import { getServicesByLanguageId } from "./util.js";
+import { getServicesByLanguageId } from "@mdeo/language-common";
 
 /**
  * A delegating external reference collector for the config language.
@@ -47,8 +47,7 @@ export class ConfigDelegatingExternalReferenceCollector implements ExternalRefer
 
         for (const languageKey of this.pluginLanguageKeys) {
             const pluginServices = getServicesByLanguageId(registry, languageKey) as
-                | (LangiumCoreServices & Partial<ExternalReferenceAdditionalServices>)
-                | undefined;
+                (LangiumCoreServices & Partial<ExternalReferenceAdditionalServices>) | undefined;
             const collector = pluginServices?.references?.ExternalReferenceCollector;
             if (collector == undefined) {
                 continue;

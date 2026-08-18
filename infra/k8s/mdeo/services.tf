@@ -75,6 +75,26 @@ locals {
       }
     }
 
+    "service-csv" = {
+      port = 3000
+      env = {
+        PORT                  = "3000"
+        HOST                  = "0.0.0.0"
+        BACKEND_API_URL       = "http://backend:8080/api"
+        MAX_LANGIUM_INSTANCES = tostring(var.max_langium_instances)
+      }
+    }
+
+    "service-model-csv" = {
+      port = 3000
+      env = {
+        PORT                  = "3000"
+        HOST                  = "0.0.0.0"
+        BACKEND_API_URL       = "http://backend:8080/api"
+        MAX_LANGIUM_INSTANCES = tostring(var.max_langium_instances)
+      }
+    }
+
     "workbench" = {
       port = 80
       env = {
@@ -85,6 +105,8 @@ locals {
         PLUGIN_CONFIG_SERVICE                 = "http://service-config:3000"
         PLUGIN_CONFIG_OPTIMIZATION_SERVICE    = "http://service-config-optimization:3000"
         PLUGIN_CONFIG_MDEO_SERVICE            = "http://service-config-mdeo:3000"
+        PLUGIN_CSV_SERVICE                    = "http://service-csv:3000"
+        PLUGIN_MODEL_CSV_SERVICE              = "http://service-model-csv:3000"
         # No path component, deliberately: nginx's proxy_pass treats a URI
         # here as replacing the matched location prefix rather than being
         # appended to it, so an /api suffix here would turn /api/... into

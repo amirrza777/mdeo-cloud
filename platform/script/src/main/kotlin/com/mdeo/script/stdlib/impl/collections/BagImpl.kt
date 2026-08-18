@@ -1,6 +1,6 @@
 package com.mdeo.script.stdlib.impl.collections
 
-import org.apache.commons.collections4.bag.HashBag
+import org.apache.commons.collections4.multiset.HashMultiSet
 import com.mdeo.script.runtime.interfaces.Action1
 import com.mdeo.script.runtime.interfaces.Func1
 import com.mdeo.script.runtime.interfaces.Func2
@@ -8,20 +8,20 @@ import com.mdeo.script.runtime.interfaces.Predicate1
 import java.util.concurrent.ThreadLocalRandom
 
 /**
- * Implementation of [Bag] backed by Apache Commons HashBag.
+ * Implementation of [Bag] backed by Apache Commons HashMultiSet.
  * A mutable bag (multiset) that allows duplicate elements with count tracking.
  *
  * @param T the type of elements in this bag
  */
 class BagImpl<T> : Bag<T> {
 
-    private val backing: HashBag<T>
+    private val backing: HashMultiSet<T>
 
     /**
      * Creates an empty bag.
      */
     constructor() {
-        backing = HashBag()
+        backing = HashMultiSet()
     }
 
     /**
@@ -30,7 +30,7 @@ class BagImpl<T> : Bag<T> {
      * @param elements the elements to add to the bag
      */
     constructor(elements: kotlin.collections.Collection<T>) {
-        backing = HashBag(elements)
+        backing = HashMultiSet(elements)
     }
 
     /**
@@ -39,7 +39,7 @@ class BagImpl<T> : Bag<T> {
      * @param elements the elements to add to the bag
      */
     constructor(elements: Iterable<T>) {
-        backing = HashBag()
+        backing = HashMultiSet()
         for (element in elements) {
             backing.add(element)
         }
@@ -49,21 +49,21 @@ class BagImpl<T> : Bag<T> {
      * Creates a bag that takes ownership of [owned] rather than copying it.
      *
      * The derivation operators below (`filter`, `reject`, `including`, …) each build a
-     * fresh [HashBag] that is not reachable from anywhere else. Handing it to the
+     * fresh [HashMultiSet] that is not reachable from anywhere else. Handing it to the
      * [kotlin.collections.Collection] constructor would copy every element into a second
-     * [HashBag]; adopting it directly halves the work. Callers must not retain a reference
+     * [HashMultiSet]; adopting it directly halves the work. Callers must not retain a reference
      * to [owned] afterwards.
      *
      * @param owned the backing bag to adopt.
      * @param marker distinguishes this constructor from the [kotlin.collections.Collection]
-     *   one, which [HashBag] would otherwise also match.
+     *   one, which [HashMultiSet] would otherwise also match.
      */
-    private constructor(owned: HashBag<T>, @Suppress("UNUSED_PARAMETER") marker: Unit) {
+    private constructor(owned: HashMultiSet<T>, @Suppress("UNUSED_PARAMETER") marker: Unit) {
         backing = owned
     }
 
     /** Wraps a freshly built [bag] without copying it. See the adopting constructor. */
-    private fun adopt(bag: HashBag<T>): BagImpl<T> = BagImpl(bag, Unit)
+    private fun adopt(bag: HashMultiSet<T>): BagImpl<T> = BagImpl(bag, Unit)
 
     override fun iterator(): Iterator<T> = backing.iterator()
 
@@ -95,10 +95,7 @@ class BagImpl<T> : Bag<T> {
         return true
     }
 
-    override fun count(item: Any?): Int {
-        @Suppress("UNCHECKED_CAST")
-        return backing.getCount(item as T)
-    }
+    override fun count(item: Any?): Int = backing.getCount(item)
 
     override fun count(predicate: Predicate1<T>): Int {
         var count = 0
@@ -111,13 +108,13 @@ class BagImpl<T> : Bag<T> {
     }
 
     override fun excluding(item: Any?): ReadonlyCollection<T> {
-        val result = HashBag(backing)
+        val result = HashMultiSet(backing)
         result.remove(item, 1)
         return adopt(result)
     }
 
     override fun excludingAll(col: ReadonlyCollection<T>): ReadonlyCollection<T> {
-        val result = HashBag(backing)
+        val result = HashMultiSet(backing)
         for (element in col) {
             result.remove(element, 1)
         }
@@ -125,13 +122,13 @@ class BagImpl<T> : Bag<T> {
     }
 
     override fun including(item: T): ReadonlyCollection<T> {
-        val result = HashBag(backing)
+        val result = HashMultiSet(backing)
         result.add(item)
         return adopt(result)
     }
 
     override fun includingAll(col: ReadonlyCollection<T>): ReadonlyCollection<T> {
-        val result = HashBag(backing)
+        val result = HashMultiSet(backing)
         for (element in col) {
             result.add(element)
         }
@@ -331,7 +328,7 @@ class BagImpl<T> : Bag<T> {
     }
 
     override fun reject(predicate: Predicate1<T>): Bag<T> {
-        val result = HashBag<T>()
+        val result = HashMultiSet<T>()
         for (element in backing) {
             if (!predicate.call(element)) {
                 result.add(element)
@@ -341,7 +338,7 @@ class BagImpl<T> : Bag<T> {
     }
 
     override fun rejectOne(predicate: Predicate1<T>): Bag<T> {
-        val result = HashBag<T>()
+        val result = HashMultiSet<T>()
         var removed = false
         for (element in backing) {
             if (!removed && predicate.call(element)) {
@@ -354,7 +351,7 @@ class BagImpl<T> : Bag<T> {
     }
 
     override fun filter(predicate: Predicate1<T>): Bag<T> {
-        val result = HashBag<T>()
+        val result = HashMultiSet<T>()
         for (element in backing) {
             if (predicate.call(element)) {
                 result.add(element)
@@ -432,14 +429,16 @@ class BagImpl<T> : Bag<T> {
         backing.clear()
     }
 
+    // MultiSet.remove(item, n) reports the count the item had *before* the removal, so a
+    // non-zero result is what signals that something was actually removed.
     override fun remove(item: T): Boolean {
-        return backing.remove(item, 1)
+        return backing.remove(item, 1) > 0
     }
 
     override fun removeAll(col: ReadonlyCollection<T>): Boolean {
         var modified = false
         for (element in col) {
-            if (backing.remove(element, 1)) {
+            if (backing.remove(element, 1) > 0) {
                 modified = true
             }
         }

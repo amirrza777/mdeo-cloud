@@ -1151,8 +1151,7 @@ export class WebSocketApi {
      */
     async getExecutionSummary(projectId: string, executionId: string): Promise<string> {
         const data = (await this.sendExecutionRequest("exec/summary", projectId, executionId)) as
-            | { summary?: string }
-            | undefined;
+            { summary?: string } | undefined;
         return data?.summary ?? "";
     }
 
@@ -1165,8 +1164,7 @@ export class WebSocketApi {
      */
     async getExecutionFileTree(projectId: string, executionId: string): Promise<ExecutionFileEntry[]> {
         const data = (await this.sendExecutionRequest("exec/fileTree", projectId, executionId)) as
-            | { files?: ExecutionFileEntry[] }
-            | undefined;
+            { files?: ExecutionFileEntry[] } | undefined;
         return data?.files ?? [];
     }
 
@@ -1180,8 +1178,7 @@ export class WebSocketApi {
      */
     async getExecutionFile(projectId: string, executionId: string, path: string): Promise<string> {
         const data = (await this.sendExecutionRequest("exec/file", projectId, executionId, { path })) as
-            | { content?: string }
-            | undefined;
+            { content?: string } | undefined;
         return data?.content ?? "";
     }
 

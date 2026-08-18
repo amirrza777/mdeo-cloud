@@ -141,12 +141,10 @@ export class MetamodelRequestClipboardDataActionHandler extends BaseRequestClipb
             retainedExtensions.length > 0
                 ? {
                       $type: ClassExtensions.name,
-                      extensions: retainedExtensions.map(
-                          (ext): ClassExtensionType => ({
-                              $type: ClassExtension.name,
-                              class: { $refText: ext.class.$refText, ref: ext.class.ref }
-                          })
-                      )
+                      extensions: retainedExtensions.map((ext): ClassExtensionType => ({
+                          $type: ClassExtension.name,
+                          class: { $refText: ext.class.$refText, ref: ext.class.ref }
+                      }))
                   }
                 : undefined;
 

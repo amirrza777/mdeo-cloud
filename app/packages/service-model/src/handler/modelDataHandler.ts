@@ -4,11 +4,13 @@ import {
     ModelDataConverter,
     Model,
     ModelContributionPlugin,
-    getWrapperInterfaceName
+    pluginForImport,
+    resolveMetamodelClassInfo
 } from "@mdeo/language-model";
+import { Class, type ClassType } from "@mdeo/language-metamodel";
+import type { AstReflection } from "@mdeo/language-common";
 import type {
     MetamodelClassInfo,
-    MetamodelPropertyInfo,
     ModelPluginData,
     ModelPluginRequestBody,
     ModelPluginRequestResponse
@@ -24,35 +26,23 @@ export const MODEL_DATA_HANDLER_KEY = "model-data";
  * Extracts a flat description of a metamodel's classes for import plugins.
  *
  * Import plugins map their own source data onto the metamodel but have no access
- * to the metamodel document, so this is sent to them as plain data.
+ * to the metamodel document, so this is sent to them as plain data. Uses the
+ * same {@link resolveMetamodelClassInfo} the diagram-rendering side of an
+ * import contribution plugin uses, so both agree on what a class looks like
+ * (its full inherited attribute and reference properties) instead of two
+ * independent implementations that can silently drift apart.
  *
  * @param metamodelAst The parsed metamodel document root
+ * @param reflection The AST reflection used for chain and association resolution
  * @returns One entry per class declared in the metamodel
  */
-function extractMetamodelClasses(metamodelAst: { elements?: unknown[] } | undefined): MetamodelClassInfo[] {
-    return ((metamodelAst?.elements ?? []) as any[])
-        .filter((element) => element.$type === "Class")
-        .map(
-            (cls): MetamodelClassInfo => ({
-                name: cls.name,
-                properties: (cls.properties ?? []).map((prop: any): MetamodelPropertyInfo => {
-                    const primitiveType = prop.type?.name;
-                    const enumRef = prop.type?.enum?.ref;
-                    const isReference = prop.$type === "AssociationEnd";
-                    return {
-                        name: prop.name,
-                        type: isReference
-                            ? "reference"
-                            : enumRef
-                              ? "enum"
-                              : ((primitiveType ?? "string") as MetamodelPropertyInfo["type"]),
-                        enumEntries: enumRef ? enumRef.entries?.map((entry: any) => entry.name) : undefined,
-                        isReference,
-                        referencedClass: isReference ? prop.class?.ref?.name : undefined
-                    };
-                })
-            })
-        );
+function extractMetamodelClasses(
+    metamodelAst: { elements?: AstNode[] } | undefined,
+    reflection: AstReflection
+): MetamodelClassInfo[] {
+    return (metamodelAst?.elements ?? [])
+        .filter((element): element is ClassType => reflection.isInstance(element, Class))
+        .map((cls) => resolveMetamodelClassInfo(cls, reflection));
 }
 
 /**
@@ -119,29 +109,36 @@ export const modelDataHandler: FileDataHandler<ModelData | null, ModelServices> 
         return { data: null, ...serverApi.getTrackedRequests() };
     }
 
-    const metamodelClasses = extractMetamodelClasses(metamodelDoc.parseResult?.value as { elements?: unknown[] });
+    const metamodelClasses = extractMetamodelClasses(
+        metamodelDoc.parseResult?.value as { elements?: AstNode[] },
+        reflection
+    );
 
     const importedInstances: ModelData["instances"] = [];
     const importedLinks: ModelData["links"] = [];
     const accumulatedFileDeps: FileDependency[] = [];
     const accumulatedDataDeps: DataDependency[] = [];
 
-    for (const plugin of activeModelPlugins) {
-        const partialBlocks: string[] = [];
-        for (const contributedImport of plugin.imports) {
-            const wrapperType = getWrapperInterfaceName(contributedImport.name);
-            for (const modelImport of modelImports) {
-                if (modelImport.$type !== wrapperType) {
-                    continue;
-                }
-                const contentText = modelImport.content?.$cstNode?.text ?? "";
-                if (contentText !== "") {
-                    partialBlocks.push(`import ${contributedImport.name} ${contentText}`);
-                }
-            }
+    const contributionImports = instance.services.contributions.Imports;
+    const partialBlocksByPlugin = new Map<string, string[]>();
+    for (const modelImport of modelImports) {
+        const namingInfo = pluginForImport(contributionImports, modelImport);
+        if (namingInfo == undefined) {
+            continue;
         }
+        const contentText = modelImport.content?.$cstNode?.text ?? "";
+        if (contentText === "") {
+            continue;
+        }
+        const blocks = partialBlocksByPlugin.get(namingInfo.plugin.languageKey) ?? [];
+        blocks.push(`import ${namingInfo.importName} ${contentText}`);
+        partialBlocksByPlugin.set(namingInfo.plugin.languageKey, blocks);
+    }
 
-        if (partialBlocks.length === 0) {
+    for (const plugin of activeModelPlugins) {
+        const partialBlocks = partialBlocksByPlugin.get(plugin.languageKey);
+
+        if (partialBlocks == undefined || partialBlocks.length === 0) {
             continue;
         }
 

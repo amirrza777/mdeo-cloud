@@ -54,8 +54,8 @@ assets referenced from that manifest (`language.js`, `editor.js`, `styles.css`) 
 same service and imported by the workbench as ES modules.
 
 The bundled plugins are reachable at `/plugin/<name>` behind the workbench's reverse proxy, which is
-what the default `DEFAULT_PLUGIN_URLS` refers to. The two CSV plugins are the exception: only
-`infra/docker-compose-dev.yaml` starts and registers them.
+what the default `DEFAULT_PLUGIN_URLS` refers to. All nine are started and registered by every
+deployment: the three compose files and the Terraform stack.
 
 ## Writing your own
 

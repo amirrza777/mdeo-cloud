@@ -193,9 +193,7 @@ export class GrammarSerializer {
      * Undefined slots are placeholders during the registration process.
      */
     private readonly interfaces: (
-        | SerializedAstNode<GrammarAST.Interface>
-        | SerializableExternalReference
-        | undefined
+        SerializedAstNode<GrammarAST.Interface> | SerializableExternalReference | undefined
     )[] = [];
 
     /**

@@ -96,8 +96,10 @@ export async function createLanguageService<T>(config: ServiceConfig<T>): Promis
             root: staticPath,
             prefix: staticPrefix,
             decorateReply: false,
-            setHeaders: (res) => {
-                res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+            // @fastify/static v10 hands this callback a FastifyReply rather than the raw
+            // ServerResponse, so headers go through reply.header() instead of setHeader().
+            setHeaders: (reply) => {
+                reply.header("Cross-Origin-Resource-Policy", "cross-origin");
             }
         });
     }

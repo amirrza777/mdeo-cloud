@@ -274,8 +274,31 @@ When developing against the Vite dev server, add a proxy entry to
 
 ## 7. Package it for deployment
 
-Add a Dockerfile under `infra/docker/todo/`, a service entry to the compose files, and the plugin URL
-to `DEFAULT_PLUGIN_URLS` so fresh installations pick it up automatically.
+A bundled plugin is named in eight places, and missing one of them fails in a different way each
+time. Work through them together:
+
+| File | What to add | If you forget |
+| --- | --- | --- |
+| `infra/docker/service-todo/Dockerfile` | The build, with the `SERVICE_VERSION` build arg | Nothing to run |
+| `infra/docker/workbench/nginx.conf` | A `location ^~ /plugin/todo/` block proxying `${PLUGIN_TODO_SERVICE}` | **The workbench container will not start at all** — see below |
+| `infra/docker-compose.yaml` | The service, `PLUGIN_TODO_SERVICE` on `workbench`, `/plugin/todo` in `DEFAULT_PLUGIN_URLS` | Quick start broken |
+| `infra/docker-compose-prod.yaml` | The same three | Production broken |
+| `infra/docker-compose-dev.yaml` | The same three, plus a published port matching the Vite proxy | Not buildable from a checkout |
+| `infra/k8s/mdeo/services.tf` | An entry in `js_services`, and `PLUGIN_TODO_SERVICE` on `workbench` | Pod in `CrashLoopBackOff` |
+| `infra/k8s/mdeo/main.tf`, `backend.tf` | `/plugin/todo` in `plugin_service_urls` and in the `wait-for-plugins` loop | Registration races the backend |
+| `.github/workflows/docker-publish.yml` | The service in **all three** matrices (`build-amd64`, `build-arm64`, `merge`) | The image is never published, so releases reference a tag that does not exist |
+
+::: danger nginx.conf is shared by every deployment
+The template is rendered with `envsubst`, which leaves an undefined variable in place — and nginx
+then rejects `${PLUGIN_TODO_SERVICE}` as an unknown variable of its own and refuses to start. Adding
+a `location` block without setting the variable everywhere the workbench runs takes down the whole
+workbench, not just your plugin. Check with:
+
+```bash
+docker compose -f infra/docker-compose.yaml config --quiet
+docker run --rm --env-file <(...) -v "$PWD/infra/docker/workbench/nginx.conf:/etc/nginx/templates/default.conf.template:ro" nginx:alpine nginx -t
+```
+:::
 
 ## Checklist
 
@@ -286,3 +309,6 @@ to `DEFAULT_PLUGIN_URLS` so fresh installations pick it up automatically.
 - [ ] The file extension includes the leading dot
 - [ ] `GET /` returns the manifest
 - [ ] Static assets are reachable under `/static/`
+- [ ] A Vite proxy entry exists, declared before any shorter path it starts with
+- [ ] All eight deployment files from step 7 name the plugin
+- [ ] `nginx -t` passes against the template with each compose file's environment

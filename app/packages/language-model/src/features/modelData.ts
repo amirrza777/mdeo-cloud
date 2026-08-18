@@ -20,6 +20,13 @@ export interface ModelDataInstance {
     className: string;
 
     /**
+     * The class' own name followed by all its superclasses' names, if known.
+     * Enables the diagram's connection validation (`GObjectNode.canConnect`)
+     * for this instance.
+     */
+    classHierarchy?: string[];
+
+    /**
      * All property assignments for this instance.
      * Includes all properties defined in the class, with null for unset optional properties.
      */

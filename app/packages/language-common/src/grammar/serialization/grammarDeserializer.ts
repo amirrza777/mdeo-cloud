@@ -207,16 +207,14 @@ export class GrammarDeserializer {
         serialized: SerializedAstNode<GrammarAST.ParserRule> | SerializedAstNode<GrammarAST.InfixRule>
     ): ParserRule<any> {
         let cached:
-            | SerializableGrammarNode<GrammarAST.ParserRule>
-            | SerializableGrammarNode<GrammarAST.InfixRule>
-            | undefined = undefined;
+            SerializableGrammarNode<GrammarAST.ParserRule> | SerializableGrammarNode<GrammarAST.InfixRule> | undefined =
+            undefined;
         return {
             name: serialized.name,
             toRule: () => {
                 if (cached == undefined) {
                     cached = this.resolveReferences(serialized) as
-                        | SerializableGrammarNode<GrammarAST.ParserRule>
-                        | SerializableGrammarNode<GrammarAST.InfixRule>;
+                        SerializableGrammarNode<GrammarAST.ParserRule> | SerializableGrammarNode<GrammarAST.InfixRule>;
                 }
                 return cached;
             }

@@ -88,7 +88,7 @@ fun Application.module(appConfig: AppConfig) {
     }
     
     install(Sessions) {
-        val secretSignKey = hex(appConfig.session.encryptionKey)
+        val secretSignKey = appConfig.session.encryptionKey.hexToByteArray()
         cookie<UserSession>("MDEO_SESSION") {
             cookie.path = "/"
             cookie.httpOnly = true
