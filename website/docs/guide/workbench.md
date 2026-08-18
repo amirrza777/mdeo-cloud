@@ -92,8 +92,10 @@ Cloning and pushing use your ordinary MDEO Cloud username and password, over HTT
 authentication — there is nothing separate to set up. You need read access to clone and write access
 to push, the same permissions that govern the workbench itself.
 
-A clone contains every project file, plus a `.mdeo/plugins.json` listing the project's enabled
+A clone contains every project file, plus a `.mdeo` file listing the project's enabled
 plugins, so a fresh clone opened as a new project comes up with the same languages available.
+Changing that file over a push requires admin permission on the project, the same bar
+changing plugins from the workbench itself is held to, not merely write access.
 Diagram layout is not included: it is purely visual and changes on nearly every interaction with a
 diagram, so a project opened for the first time from a clone will need its nodes laid out again.
 

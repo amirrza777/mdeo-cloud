@@ -173,6 +173,7 @@
                                         variant="ghost"
                                         size="icon"
                                         class="h-8 w-8 shrink-0"
+                                        :aria-label="isGitUrlCopied ? 'Copied' : 'Copy clone URL'"
                                         @click="handleCopyGitUrl"
                                     >
                                         <Check v-if="isGitUrlCopied" class="size-4" />
