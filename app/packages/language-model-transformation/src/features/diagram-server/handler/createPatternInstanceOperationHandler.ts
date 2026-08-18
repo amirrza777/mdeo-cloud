@@ -41,6 +41,7 @@ import {
 import { ModelTransformationElementType, PatternModifierKind } from "@mdeo/protocol-model-transformation";
 import type { ModelTransformationMetadataManager } from "../modelTransformationMetadataManager.js";
 import type { ModelTransformationGModelFactory } from "../modelTransformationGModelFactory.js";
+import { findContainingCondition } from "../modelTransformationPatternUtils.js";
 import type { WorkspaceEdit } from "vscode-languageserver-types";
 import {
     Class,
@@ -683,10 +684,13 @@ export class CreatePatternInstanceOperationHandler
     }
 
     /**
-     * Returns all PatternObjectInstances declared anywhere in the transformation.
-     * Used to populate "add instance" toolbox items.
+     * Returns the PatternObjectInstances that can be referenced from a match pattern.
      *
-     * @returns All `PatternObjectInstance` AST nodes found in the entire source model,
+     * Instances declared in an application condition block are left out: their names belong to
+     * the block's own graph and cannot be named from anywhere else, so referencing one would
+     * only produce an unresolvable reference.
+     *
+     * @returns The referenceable `PatternObjectInstance` AST nodes of the entire source model,
      *   or an empty array when the source model is unavailable
      */
     private getAllPatternObjectInstances(): PatternObjectInstanceType[] {
@@ -695,7 +699,10 @@ export class CreatePatternInstanceOperationHandler
 
         const instances: PatternObjectInstanceType[] = [];
         for (const node of AstUtils.streamAllContents(sourceModel)) {
-            if (this.reflection.isInstance(node, PatternObjectInstance)) {
+            if (
+                this.reflection.isInstance(node, PatternObjectInstance) &&
+                findContainingCondition(node, this.reflection) == undefined
+            ) {
                 instances.push(node as PatternObjectInstanceType);
             }
         }

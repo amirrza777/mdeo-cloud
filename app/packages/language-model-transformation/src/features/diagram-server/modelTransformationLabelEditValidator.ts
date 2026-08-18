@@ -25,6 +25,7 @@ import {
     NEW_VARIABLE_REASSIGNMENT_LABEL_PREFIX
 } from "./handler/addVariableOperationHandler.js";
 import { NEW_WHERE_CLAUSE_LABEL_PREFIX } from "./handler/addWhereClauseOperationHandler.js";
+import { effectivePatternModifier } from "./modelTransformationPatternUtils.js";
 
 const { injectable, inject } = sharedImport("inversify");
 const { ValidationStatus, GModelIndex: GModelIndexKey } = sharedImport("@eclipse-glsp/server");
@@ -206,7 +207,7 @@ export class ModelTransformationLabelEditValidator extends BaseLabelEditValidato
         }
 
         if (this.reflection.isInstance(astNode, PatternObjectInstance)) {
-            return modifierStringToKind((astNode as PatternObjectInstanceType).modifier?.modifier);
+            return effectivePatternModifier(astNode, this.reflection);
         }
         if (this.reflection.isInstance(astNode, PatternObjectInstanceReference)) {
             return "reference";
@@ -458,8 +459,7 @@ export class ModelTransformationLabelEditValidator extends BaseLabelEditValidato
                 const container = prop.$container;
                 if (container != undefined) {
                     if (this.reflection.isInstance(container, PatternObjectInstance)) {
-                        const instance = container as PatternObjectInstanceType;
-                        return modifierStringToKind(instance.modifier?.modifier);
+                        return effectivePatternModifier(container, this.reflection);
                     }
                     if (this.reflection.isInstance(container, PatternObjectInstanceReference)) {
                         return "reference";
@@ -602,26 +602,5 @@ export class ModelTransformationLabelEditValidator extends BaseLabelEditValidato
             return this.error("Condition expression cannot be empty.");
         }
         return undefined;
-    }
-}
-
-/**
- * Converts a modifier string value from the AST to a {@link PatternModifierKind} enum value.
- *
- * @param modifier The raw string modifier value (e.g., `"create"`, `"delete"`)
- * @returns The corresponding {@link PatternModifierKind}
- */
-function modifierStringToKind(modifier: string | undefined): PatternModifierKind {
-    switch (modifier) {
-        case "create":
-            return PatternModifierKind.CREATE;
-        case "delete":
-            return PatternModifierKind.DELETE;
-        case "forbid":
-            return PatternModifierKind.FORBID;
-        case "require":
-            return PatternModifierKind.REQUIRE;
-        default:
-            return PatternModifierKind.NONE;
     }
 }

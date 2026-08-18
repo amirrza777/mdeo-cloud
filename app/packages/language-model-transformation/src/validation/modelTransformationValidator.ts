@@ -14,6 +14,7 @@ import {
     Pattern,
     PatternLink,
     PatternObjectInstance,
+    PatternObjectInstanceReference,
     PatternVariable,
     PatternApplicationCondition,
     type ModelTransformationType,
@@ -357,6 +358,7 @@ export class ModelTransformationValidator extends BaseModelValidator {
      * enclosing pattern, which constrains what may appear inside it:
      * - it must not be empty, since an empty condition is either always or never satisfied,
      * - it must not create or delete anything, because a condition never rewrites the model,
+     *   which also rules out assigning a property,
      * - it must be connected to the enclosing pattern or self-contained, which the reference
      *   resolution already guarantees, and
      * - its name, when given, must be unique among the blocks of the same pattern.
@@ -387,6 +389,13 @@ export class ModelTransformationValidator extends BaseModelValidator {
                         property: "modifier"
                     });
                 }
+                this.validateNoAssignmentsInCondition(element.properties, kind, accept);
+            } else if (this.reflection.isInstance(element, PatternObjectInstanceReference)) {
+                this.validateNoAssignmentsInCondition(
+                    (element as PatternObjectInstanceReferenceType).properties,
+                    kind,
+                    accept
+                );
             } else if (this.reflection.isInstance(element, PatternLink)) {
                 const modifier = element.modifier?.modifier;
                 if (modifier != undefined) {
@@ -399,6 +408,34 @@ export class ModelTransformationValidator extends BaseModelValidator {
         }
 
         this.validateApplicationConditionNameUnique(condition, accept);
+    }
+
+    /**
+     * Reports every property assignment of a condition element.
+     *
+     * A condition decides whether a match is admissible, it never writes to the model, so `=`
+     * has nothing to do inside a block: the runtime applies the modifications of the match
+     * pattern only and would drop the assignment without a trace. The comparison operators
+     * express what is meant instead.
+     *
+     * @param properties The properties of a condition element
+     * @param kind The kind of the enclosing block, used in the message
+     * @param accept The validation acceptor
+     */
+    private validateNoAssignmentsInCondition(
+        properties: PatternPropertyAssignmentType[] | undefined,
+        kind: string,
+        accept: ValidationAcceptor
+    ): void {
+        for (const property of properties ?? []) {
+            if (property.operator === "=") {
+                accept(
+                    "error",
+                    `Cannot assign a property inside a '${kind}' block. Use a comparison operator (==, !=, <, >, <=, >=).`,
+                    { node: property, property: "operator" }
+                );
+            }
+        }
     }
 
     /**

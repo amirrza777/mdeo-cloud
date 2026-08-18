@@ -1,4 +1,5 @@
 import type { AstReflection } from "@mdeo/language-common";
+import { PatternModifierKind } from "@mdeo/protocol-model-transformation";
 import type { AstNode } from "langium";
 import {
     Pattern,
@@ -107,4 +108,88 @@ export function flattenPatternElements(
     }
 
     return [...result, ...conditions];
+}
+
+/**
+ * Returns the pattern a node belongs to, seeing through application condition blocks.
+ *
+ * @param node The node to start from.
+ * @param reflection The AST reflection instance for type checks.
+ * @returns The enclosing pattern, or `undefined` when the node is not inside one.
+ */
+export function findContainingPattern(node: AstNode, reflection: AstReflection): PatternType | undefined {
+    let current: AstNode | undefined = node.$container;
+    while (current != undefined) {
+        if (reflection.isInstance(current, Pattern)) {
+            return current as PatternType;
+        }
+        current = current.$container;
+    }
+    return undefined;
+}
+
+/**
+ * Returns the application condition block a node is declared in.
+ *
+ * @param node The node to start from.
+ * @param reflection The AST reflection instance for type checks.
+ * @returns The block, or `undefined` when the node belongs to the match pattern itself.
+ */
+export function findContainingCondition(
+    node: AstNode,
+    reflection: AstReflection
+): PatternApplicationConditionType | undefined {
+    let current: AstNode | undefined = node.$container;
+    while (current != undefined) {
+        if (reflection.isInstance(current, PatternApplicationCondition)) {
+            return current as PatternApplicationConditionType;
+        }
+        if (reflection.isInstance(current, Pattern)) {
+            return undefined;
+        }
+        current = current.$container;
+    }
+    return undefined;
+}
+
+/**
+ * Converts a modifier keyword to the corresponding {@link PatternModifierKind}.
+ *
+ * @param modifier The raw modifier keyword, if any.
+ * @returns The matching kind, {@link PatternModifierKind.NONE} for an unknown or absent keyword.
+ */
+export function patternModifierKind(modifier: string | undefined): PatternModifierKind {
+    switch (modifier) {
+        case "create":
+            return PatternModifierKind.CREATE;
+        case "delete":
+            return PatternModifierKind.DELETE;
+        case "require":
+            return PatternModifierKind.REQUIRE;
+        case "forbid":
+            return PatternModifierKind.FORBID;
+        default:
+            return PatternModifierKind.NONE;
+    }
+}
+
+/**
+ * Returns the modifier an element effectively carries.
+ *
+ * An element declared inside an application condition block carries the block's kind:
+ * a block is what `forbid` / `require` element modifiers used to express, so everything
+ * that reasons about modifiers - what a link may connect, whether a property may be
+ * assigned - has to read the block that way.
+ *
+ * @param node The element, or a node declared inside one.
+ * @param reflection The AST reflection instance for type checks.
+ * @returns The effective modifier kind of the element.
+ */
+export function effectivePatternModifier(node: AstNode, reflection: AstReflection): PatternModifierKind {
+    const condition = findContainingCondition(node, reflection);
+    if (condition != undefined) {
+        return patternModifierKind(condition.kind);
+    }
+    const modifier = (node as { modifier?: { modifier?: string } }).modifier?.modifier;
+    return patternModifierKind(modifier);
 }

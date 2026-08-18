@@ -82,7 +82,9 @@ name identifies the block in diagnostics, and in the graphical editor its elemen
 - constrain an object of the enclosing pattern through a reference — `patient { age > 60 }`.
 
 Objects declared inside a block are not bound by the match: they are invisible outside their block,
-and outside it they cannot be used in expressions, created or deleted.
+and outside it they cannot be used in expressions, created or deleted. A condition decides whether a
+match is admissible and never writes to the model, so its objects only compare properties — `=` is
+rejected inside a block.
 
 A block may also carry `where` clauses. A clause inside a block constrains that block — the block
 only holds when its graph is found *and* its clauses are satisfied — and it may compare the block's

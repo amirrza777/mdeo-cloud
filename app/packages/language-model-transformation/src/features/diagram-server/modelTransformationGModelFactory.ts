@@ -61,7 +61,11 @@ import { EndNodeKind, ModelTransformationElementType, PatternModifierKind } from
 import { ID } from "@mdeo/language-common";
 import { ModelTransformationIdGenerator } from "./modelTransformationIdGenerator.js";
 import { adaptGeneratedModelTransformationText } from "./generated/generatedModelTransformationAstAdapter.js";
-import { flattenPatternElements, type FlattenedPatternElement } from "./modelTransformationPatternUtils.js";
+import {
+    flattenPatternElements,
+    patternModifierKind,
+    type FlattenedPatternElement
+} from "./modelTransformationPatternUtils.js";
 
 const { injectable } = sharedImport("inversify");
 const { GGraph } = sharedImport("@eclipse-glsp/server");
@@ -321,8 +325,8 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
         const stereotype = this.getConditionStereotype(condition);
         const modifier =
             condition != undefined
-                ? this.getPatternModifierKind(condition.kind)
-                : this.getPatternModifierKind(instance.modifier?.modifier);
+                ? patternModifierKind(condition.kind)
+                : patternModifierKind(instance.modifier?.modifier);
         const resolvedClass = instance.class?.ref as ClassType | undefined;
         const classHierarchy =
             resolvedClass != undefined
@@ -757,9 +761,7 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
 
         const stereotype = this.getConditionStereotype(condition);
         const modifier =
-            condition != undefined
-                ? this.getPatternModifierKind(condition.kind)
-                : this.getPatternModifierKind(link.modifier?.modifier);
+            condition != undefined ? patternModifierKind(condition.kind) : patternModifierKind(link.modifier?.modifier);
         const sourceProperty = link.source?.property?.$refText;
         const targetProperty = link.target?.property?.$refText;
 
@@ -980,21 +982,6 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
         }
 
         graph.children.push(edge);
-    }
-
-    private getPatternModifierKind(modifier: string | undefined): PatternModifierKind {
-        switch (modifier) {
-            case "create":
-                return PatternModifierKind.CREATE;
-            case "delete":
-                return PatternModifierKind.DELETE;
-            case "forbid":
-                return PatternModifierKind.FORBID;
-            case "require":
-                return PatternModifierKind.REQUIRE;
-            default:
-                return PatternModifierKind.NONE;
-        }
     }
 
     /**
