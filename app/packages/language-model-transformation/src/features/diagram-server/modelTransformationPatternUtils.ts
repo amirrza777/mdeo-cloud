@@ -7,12 +7,14 @@ import {
     WhileMatchStatement,
     UntilMatchStatement,
     ForMatchStatement,
+    PatternApplicationCondition,
     type PatternType,
     type MatchStatementType,
     type IfMatchConditionAndBlockType,
     type WhileMatchStatementType,
     type UntilMatchStatementType,
-    type ForMatchStatementType
+    type ForMatchStatementType,
+    type PatternApplicationConditionType
 } from "../../grammar/modelTransformationTypes.js";
 
 /**
@@ -61,4 +63,48 @@ export function getPatternFromMatchNode(astNode: AstNode, reflection: AstReflect
     }
 
     return undefined;
+}
+
+/**
+ * A pattern element together with the application condition block it was declared in.
+ */
+export interface FlattenedPatternElement {
+    /** The pattern element itself. */
+    element: AstNode;
+    /** The block the element belongs to, or `undefined` for elements of the match pattern. */
+    condition?: PatternApplicationConditionType;
+}
+
+/**
+ * Returns every element of a pattern together with the application condition block it
+ * belongs to, so that block members are handled like the elements of the match pattern.
+ *
+ * Blocks are not drawn as containers: following Henshin, their members stay in the
+ * match node and are tagged with `«forbid name»` / `«require name»` instead, which
+ * keeps a condition legible next to the pattern it constrains. Everything that walks a
+ * pattern for its diagram elements therefore has to see through the blocks.
+ *
+ * @param pattern The pattern whose elements should be listed.
+ * @param reflection The AST reflection instance for type checks.
+ * @returns The elements in declaration order, block members after the main pattern.
+ */
+export function flattenPatternElements(
+    pattern: { elements?: unknown[] } | undefined,
+    reflection: AstReflection
+): FlattenedPatternElement[] {
+    const result: FlattenedPatternElement[] = [];
+    const conditions: FlattenedPatternElement[] = [];
+
+    for (const element of pattern?.elements ?? []) {
+        if (reflection.isInstance(element, PatternApplicationCondition)) {
+            const condition = element as PatternApplicationConditionType;
+            for (const member of condition.elements ?? []) {
+                conditions.push({ element: member as AstNode, condition });
+            }
+        } else {
+            result.push({ element: element as AstNode });
+        }
+    }
+
+    return [...result, ...conditions];
 }

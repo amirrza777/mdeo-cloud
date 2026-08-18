@@ -33,6 +33,7 @@ import {
     type ControlFlowEdge
 } from "./modelTransformationControlFlowConverter.js";
 import { ModelTransformationIdGenerator } from "./modelTransformationIdGenerator.js";
+import { flattenPatternElements } from "./modelTransformationPatternUtils.js";
 import { adaptGeneratedModelTransformationText } from "./generated/generatedModelTransformationAstAdapter.js";
 
 const { injectable, inject } = sharedImport("inversify");
@@ -222,8 +223,10 @@ export class ModelTransformationMetadataManager extends MetadataManager<ModelTra
         const deletedInstances = new Set<string>();
         const deletedInstanceNodes = new Map<string, PatternObjectInstanceDeleteType>();
 
+        const patternElements = flattenPatternElements(pattern, this.reflection).map(({ element }) => element);
+
         if (pattern?.elements != undefined) {
-            for (const element of pattern.elements) {
+            for (const element of patternElements) {
                 if (this.reflection.isInstance(element, PatternObjectInstance)) {
                     if (element.name != undefined) {
                         localInstances.set(element.name, element);
@@ -243,7 +246,7 @@ export class ModelTransformationMetadataManager extends MetadataManager<ModelTra
                     }
                 }
             }
-            for (const element of pattern.elements) {
+            for (const element of patternElements) {
                 if (this.reflection.isInstance(element, PatternLink)) {
                     const sourceInstanceName = element.source?.object?.ref?.name;
                     const targetInstanceName = element.target?.object?.ref?.name;
@@ -334,7 +337,7 @@ export class ModelTransformationMetadataManager extends MetadataManager<ModelTra
                 }
             }
 
-            for (const element of pattern.elements) {
+            for (const element of patternElements) {
                 if (this.reflection.isInstance(element, PatternLink)) {
                     this.addPatternLinkEdge(
                         element as PatternLinkType,

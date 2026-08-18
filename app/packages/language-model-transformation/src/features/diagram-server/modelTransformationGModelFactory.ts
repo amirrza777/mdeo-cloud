@@ -25,7 +25,6 @@ import {
     PatternVariableReassignment,
     PatternObjectInstanceReference,
     PatternObjectInstanceDelete,
-    PatternApplicationCondition,
     type PatternApplicationConditionType
 } from "../../grammar/modelTransformationTypes.js";
 import {
@@ -62,6 +61,7 @@ import { EndNodeKind, ModelTransformationElementType, PatternModifierKind } from
 import { ID } from "@mdeo/language-common";
 import { ModelTransformationIdGenerator } from "./modelTransformationIdGenerator.js";
 import { adaptGeneratedModelTransformationText } from "./generated/generatedModelTransformationAstAdapter.js";
+import { flattenPatternElements, type FlattenedPatternElement } from "./modelTransformationPatternUtils.js";
 
 const { injectable } = sharedImport("inversify");
 const { GGraph } = sharedImport("@eclipse-glsp/server");
@@ -167,37 +167,6 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
     }
 
     /**
-     * Returns every element of a pattern together with the application condition block it
-     * belongs to, so that block members can be rendered with the block's stereotype.
-     *
-     * Blocks are not drawn as containers: following Henshin, their members stay in the
-     * match node and are tagged with `«forbid name»` / `«require name»` instead, which
-     * keeps a condition legible next to the pattern it constrains.
-     *
-     * @param pattern The pattern whose elements should be listed.
-     * @returns The elements in declaration order, block members after the main pattern.
-     */
-    private flattenPatternElements(
-        pattern: { elements?: unknown[] } | undefined
-    ): { element: any; condition?: PatternApplicationConditionType }[] {
-        const result: { element: any; condition?: PatternApplicationConditionType }[] = [];
-        const conditions: { element: any; condition: PatternApplicationConditionType }[] = [];
-
-        for (const element of pattern?.elements ?? []) {
-            if (this.reflection.isInstance(element, PatternApplicationCondition)) {
-                const condition = element as PatternApplicationConditionType;
-                for (const member of condition.elements ?? []) {
-                    conditions.push({ element: member, condition });
-                }
-            } else {
-                result.push({ element });
-            }
-        }
-
-        return [...result, ...conditions];
-    }
-
-    /**
      * Returns the stereotype text for an element of an application condition block, or
      * `undefined` for elements of the match pattern itself.
      *
@@ -236,7 +205,7 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
         const deletedInstances = new Set<string>();
         const deletedInstanceNodes = new Map<string, PatternObjectInstanceDeleteType>();
 
-        const patternElements = this.flattenPatternElements(cfgMatchNode.pattern);
+        const patternElements = flattenPatternElements(cfgMatchNode.pattern, this.reflection);
 
         {
             for (const { element } of patternElements) {
@@ -658,7 +627,7 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
      */
     private createConstraintCompartments(
         nodeId: string,
-        patternElements: { element: any; condition?: PatternApplicationConditionType }[],
+        patternElements: FlattenedPatternElement[],
         idRegistry: ModelIdRegistry
     ): GMatchNodeCompartments | undefined {
         const whereClauseLabels: GModelElement[] = [];
