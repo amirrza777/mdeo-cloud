@@ -469,3 +469,42 @@ object GitRefsTable : Table("git_refs") {
         index(false, projectId)
     }
 }
+
+/**
+ * Personal access tokens, an alternative to the account password for git's
+ * HTTP basic auth. Only a hash of the token is stored; the raw value is
+ * shown to the user once, at creation, and cannot be recovered afterward.
+ */
+object PersonalAccessTokensTable : Table("personal_access_tokens") {
+    val id = uuid("id")
+    val userId = uuid("user_id").references(UsersTable.id, onDelete = ReferenceOption.CASCADE)
+    val name = varchar("name", 255)
+
+    /**
+     * SHA-256 hex digest of the raw token. A fast hash is deliberate here:
+     * the token itself is 256 bits of generated entropy, not a low-entropy
+     * human password, so there is nothing for a slow hash like bcrypt to
+     * protect against that a fast one does not already rule out, and doing
+     * a fast lookup on every git request is what actually closes the
+     * bcrypt-verification-oracle concern password-based git auth has.
+     */
+    val tokenHash = varchar("token_hash", 64)
+
+    /**
+     * First few characters of the raw token, kept only so a user can tell
+     * their own tokens apart in a list without the full value ever being
+     * stored or shown again.
+     */
+    val tokenPrefix = varchar("token_prefix", 16)
+
+    val createdAt = timestamp("created_at")
+    val lastUsedAt = timestamp("last_used_at").nullable()
+    val expiresAt = timestamp("expires_at").nullable()
+
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        uniqueIndex(tokenHash)
+        index(false, userId)
+    }
+}

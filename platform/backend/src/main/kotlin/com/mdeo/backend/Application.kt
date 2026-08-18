@@ -62,6 +62,7 @@ fun Application.module(appConfig: AppConfig) {
         override val webSocketNotificationService: WebSocketNotificationService by lazy { WebSocketNotificationService() }
         override val languagePluginRequestService: LanguagePluginRequestService by lazy { LanguagePluginRequestService(this) }
         override val authRateLimiter: AuthRateLimiter by lazy { AuthRateLimiter() }
+        override val personalAccessTokenService: PersonalAccessTokenService by lazy { PersonalAccessTokenService(this) }
         val gitRepositoryService: GitRepositoryService by lazy {
             GitRepositoryService(
                 fileService,
@@ -125,18 +126,19 @@ fun Application.module(appConfig: AppConfig) {
             services.gitRepositoryService,
             services.projectService,
             services.userService,
+            services.personalAccessTokenService,
             services.authRateLimiter,
             services.webSocketNotificationService,
             appConfig.git.maxPushPackSizeBytes
         )
-        
+
         authenticate(AUTH_SESSION, AUTH_JWT, optional = true) {
             fileRoutes(services.fileService, services.projectService)
             fileDataRoutes(services.fileDataService, services.projectService, services.jwtService)
             languagePluginRequestRoutes(services.languagePluginRequestService, services.projectService, services.jwtService)
             executionStateRoutes(services.executionService, services.jwtService)
         }
-        
+
         authenticate(AUTH_SESSION) {
             webSocketRoutes(
                 services.webSocketNotificationService,
@@ -151,6 +153,7 @@ fun Application.module(appConfig: AppConfig) {
             adminRoutes(services.userService)
             userRoutes(services.userService, services.projectService)
             executionRoutes(services.executionService, services.projectService)
+            patRoutes(services.personalAccessTokenService)
         }
     }
 }

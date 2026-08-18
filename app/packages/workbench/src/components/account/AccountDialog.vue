@@ -88,6 +88,95 @@
                     </CollapsibleContent>
                 </Collapsible>
 
+                <Collapsible v-model:open="isTokensSectionOpen" @update:open="handleTokensSectionToggle">
+                    <CollapsibleTrigger asChild>
+                        <Button variant="outline" class="w-full">
+                            <component :is="isTokensSectionOpen ? ChevronUp : ChevronDown" class="size-4" />
+                            <span>Access tokens</span>
+                        </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                        <div class="mt-4 space-y-4">
+                            <p class="text-xs text-muted-foreground">
+                                Use a token instead of your password when cloning or pushing over git. A
+                                token can be revoked on its own, without changing your account password.
+                            </p>
+
+                            <div v-if="createdToken" class="space-y-2 rounded-lg border border-border/70 p-3">
+                                <p class="text-xs text-muted-foreground">
+                                    Copy this token now - it will not be shown again.
+                                </p>
+                                <div class="flex items-center gap-2">
+                                    <Input :model-value="createdToken.token" readonly class="flex-1 text-xs font-mono" />
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                class="h-8 w-8 shrink-0"
+                                                :aria-label="isTokenCopied ? 'Copied' : 'Copy token'"
+                                                @click="handleCopyToken"
+                                            >
+                                                <Check v-if="isTokenCopied" class="size-4" />
+                                                <Copy v-else class="size-4" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent side="top">
+                                            {{ isTokenCopied ? "Copied" : "Copy token" }}
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </div>
+                                <Button type="button" variant="ghost" size="sm" @click="createdToken = undefined">
+                                    Done
+                                </Button>
+                            </div>
+
+                            <ul v-else-if="tokens.length > 0" class="space-y-2">
+                                <li
+                                    v-for="token in tokens"
+                                    :key="token.id"
+                                    class="flex items-center justify-between gap-2 rounded-lg border border-border/70 p-3"
+                                >
+                                    <div class="min-w-0">
+                                        <p class="truncate text-sm font-medium text-foreground">{{ token.name }}</p>
+                                        <p class="truncate text-xs text-muted-foreground font-mono">
+                                            {{ token.tokenPrefix }}…
+                                        </p>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        class="h-8 w-8 shrink-0 text-destructive"
+                                        aria-label="Revoke token"
+                                        :disabled="revokingTokenId === token.id"
+                                        @click="handleRevokeToken(token.id)"
+                                    >
+                                        <Trash2 class="size-4" />
+                                    </Button>
+                                </li>
+                            </ul>
+
+                            <p v-else class="text-xs text-muted-foreground">No access tokens yet.</p>
+
+                            <form class="flex items-center gap-2" @submit.prevent="handleCreateToken">
+                                <Input
+                                    v-model="newTokenName"
+                                    placeholder="Token name, e.g. this laptop"
+                                    class="flex-1"
+                                />
+                                <Button type="submit" :disabled="isCreatingToken || !newTokenName.trim()">
+                                    {{ isCreatingToken ? "Creating…" : "Create" }}
+                                </Button>
+                            </form>
+
+                            <Field v-if="tokensError">
+                                <FieldError :errors="[tokensError]" />
+                            </Field>
+                        </div>
+                    </CollapsibleContent>
+                </Collapsible>
+
                 <div class="flex flex-wrap justify-between gap-3">
                     <Button
                         type="button"
@@ -110,12 +199,15 @@
 
 <script setup lang="ts">
 import { computed, inject, ref } from "vue";
-import { UserRound, LogOut, ChevronDown, ChevronUp } from "@lucide/vue";
+import { UserRound, LogOut, ChevronDown, ChevronUp, Copy, Check, Trash2 } from "@lucide/vue";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogClose } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import PasswordField from "@/components/auth/PasswordField.vue";
 import { Field, FieldContent, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import type { PersonalAccessTokenCreated, PersonalAccessTokenInfo } from "@/data/api/areas/authApi";
 import { authStateKey } from "../workbench/util";
 
 const open = defineModel<boolean>("open", { default: false });
@@ -134,6 +226,15 @@ const passwordSuccess = ref<string>();
 const isUpdatingPassword = ref(false);
 const isLoggingOut = ref(false);
 const isPasswordSectionOpen = ref(false);
+
+const isTokensSectionOpen = ref(false);
+const tokens = ref<PersonalAccessTokenInfo[]>([]);
+const tokensError = ref<string>();
+const newTokenName = ref("");
+const isCreatingToken = ref(false);
+const createdToken = ref<PersonalAccessTokenCreated>();
+const isTokenCopied = ref(false);
+const revokingTokenId = ref<string>();
 
 const username = computed(() => authState.user.value?.username ?? "Unknown user");
 
@@ -167,6 +268,71 @@ async function handlePasswordChange() {
         confirmPassword.value = "";
     } finally {
         isUpdatingPassword.value = false;
+    }
+}
+
+async function loadTokens() {
+    tokensError.value = undefined;
+    const result = await authState.listTokens();
+    if (!result.success) {
+        tokensError.value = result.error.message;
+        return;
+    }
+    tokens.value = result.value;
+}
+
+async function handleTokensSectionToggle(open: boolean) {
+    if (open) {
+        await loadTokens();
+    }
+}
+
+async function handleCreateToken() {
+    if (isCreatingToken.value || !newTokenName.value.trim()) {
+        return;
+    }
+    tokensError.value = undefined;
+    isCreatingToken.value = true;
+    try {
+        const result = await authState.createToken(newTokenName.value.trim());
+        if (!result.success) {
+            tokensError.value = result.error.message;
+            return;
+        }
+        createdToken.value = result.value;
+        newTokenName.value = "";
+        await loadTokens();
+    } finally {
+        isCreatingToken.value = false;
+    }
+}
+
+async function handleCopyToken() {
+    if (!createdToken.value) {
+        return;
+    }
+    await navigator.clipboard.writeText(createdToken.value.token);
+    isTokenCopied.value = true;
+    setTimeout(() => {
+        isTokenCopied.value = false;
+    }, 2000);
+}
+
+async function handleRevokeToken(tokenId: string) {
+    if (revokingTokenId.value) {
+        return;
+    }
+    tokensError.value = undefined;
+    revokingTokenId.value = tokenId;
+    try {
+        const result = await authState.revokeToken(tokenId);
+        if (!result.success) {
+            tokensError.value = result.error.message;
+            return;
+        }
+        tokens.value = tokens.value.filter((token) => token.id !== tokenId);
+    } finally {
+        revokingTokenId.value = undefined;
     }
 }
 

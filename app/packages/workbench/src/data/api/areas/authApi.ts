@@ -12,6 +12,30 @@ export interface User {
 }
 
 /**
+ * A personal access token's metadata, without the raw value.
+ */
+export interface PersonalAccessTokenInfo {
+    id: string;
+    name: string;
+    tokenPrefix: string;
+    createdAt: string;
+    lastUsedAt: string | null;
+    expiresAt: string | null;
+}
+
+/**
+ * Response to creating a personal access token. `token` is the raw secret
+ * value and is only ever present in this one response.
+ */
+export interface PersonalAccessTokenCreated {
+    id: string;
+    name: string;
+    token: string;
+    createdAt: string;
+    expiresAt: string | null;
+}
+
+/**
  * API for authentication operations including login, logout, registration,
  * and password management.
  */
@@ -140,6 +164,87 @@ export class AuthApi {
                     return ApiResult.commonFailure(CommonErrorCode.Unknown, "Current password is incorrect");
                 }
                 return ApiResult.commonFailure(CommonErrorCode.Unavailable, "Failed to change password");
+            }
+
+            return ApiResult.success(undefined);
+        } catch (error) {
+            return ApiResult.commonFailure(CommonErrorCode.Unavailable, String(error));
+        }
+    }
+
+    /**
+     * Creates a new personal access token for the current user. The raw
+     * token value in the response is shown only this once.
+     *
+     * @param name A label to tell this token apart from others later
+     * @param expiresAt When the token stops working, or undefined for no expiry
+     * @returns A promise resolving to the created token or an error
+     */
+    async createToken(
+        name: string,
+        expiresAt?: string
+    ): Promise<ApiResult<PersonalAccessTokenCreated, CommonError>> {
+        try {
+            const response = await fetch(`${this.core.baseUrl}/tokens`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify({ name, expiresAt })
+            });
+
+            if (!response.ok) {
+                return ApiResult.commonFailure(CommonErrorCode.Unavailable, "Failed to create token");
+            }
+
+            const data = await response.json();
+            return ApiResult.success(data);
+        } catch (error) {
+            return ApiResult.commonFailure(CommonErrorCode.Unavailable, String(error));
+        }
+    }
+
+    /**
+     * Lists the current user's own personal access tokens. Never includes
+     * a raw token value.
+     *
+     * @returns A promise resolving to the list of tokens or an error
+     */
+    async listTokens(): Promise<ApiResult<PersonalAccessTokenInfo[], CommonError>> {
+        try {
+            const response = await fetch(`${this.core.baseUrl}/tokens`, {
+                method: "GET",
+                credentials: "include"
+            });
+
+            if (!response.ok) {
+                return ApiResult.commonFailure(CommonErrorCode.Unavailable, "Failed to list tokens");
+            }
+
+            const data = await response.json();
+            return ApiResult.success(data);
+        } catch (error) {
+            return ApiResult.commonFailure(CommonErrorCode.Unavailable, String(error));
+        }
+    }
+
+    /**
+     * Revokes one of the current user's own personal access tokens.
+     *
+     * @param tokenId The token to revoke
+     * @returns A promise resolving to success or an error
+     */
+    async revokeToken(tokenId: string): Promise<ApiResult<void, CommonError>> {
+        try {
+            const response = await fetch(`${this.core.baseUrl}/tokens/${tokenId}`, {
+                method: "DELETE",
+                credentials: "include"
+            });
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    return ApiResult.commonFailure(CommonErrorCode.Unknown, "Token not found");
+                }
+                return ApiResult.commonFailure(CommonErrorCode.Unavailable, "Failed to revoke token");
             }
 
             return ApiResult.success(undefined);

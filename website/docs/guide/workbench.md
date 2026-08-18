@@ -88,9 +88,18 @@ clone URL:
 git clone https://<host>/git/<project-id>.git
 ```
 
-Cloning and pushing use your ordinary MDEO Cloud username and password, over HTTP Basic
-authentication — there is nothing separate to set up. You need read access to clone and write access
-to push, the same permissions that govern the workbench itself.
+Cloning and pushing use HTTP Basic authentication. Your ordinary MDEO Cloud username and password
+work, but a personal access token is recommended instead: it can be revoked on its own without
+changing your account password, and never exposes that password to a git client or credential
+store. Create one from the **Account** dialog's **Access tokens** section (click your username in
+the sidebar), then use it as the password:
+
+```
+git clone https://<username>:<token>@<host>/git/<project-id>.git
+```
+
+You need read access to clone and write access to push, the same permissions that govern the
+workbench itself.
 
 A clone contains every project file, plus a `.mdeo` file listing the project's enabled
 plugins, so a fresh clone opened as a new project comes up with the same languages available.

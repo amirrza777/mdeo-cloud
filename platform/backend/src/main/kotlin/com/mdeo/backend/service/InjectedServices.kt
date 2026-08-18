@@ -78,4 +78,11 @@ interface InjectedServices {
      * route and git's HTTP basic authentication.
      */
     val authRateLimiter: AuthRateLimiter
+
+    /**
+     * Service for creating, listing, revoking, and verifying personal
+     * access tokens - an alternative to the account password for git's
+     * HTTP basic authentication.
+     */
+    val personalAccessTokenService: PersonalAccessTokenService
 }
