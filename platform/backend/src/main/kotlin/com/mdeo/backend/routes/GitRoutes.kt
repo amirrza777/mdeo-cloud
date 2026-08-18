@@ -165,6 +165,13 @@ fun Route.gitRoutes(
                             // not just the unpack step; see applyCommitToProject for the
                             // matching cap on decompressed size.
                             receivePack.setMaxPackSizeLimit(maxPushPackSizeBytes)
+                            // The pack limit above bounds compressed size; this bounds a
+                            // single object's inflated size, so one highly compressible
+                            // blob cannot force a large in-memory allocation on its own
+                            // while staying under the compressed pack limit. Belt and
+                            // braces alongside applyCommitToProject's running total over
+                            // the whole tree.
+                            receivePack.setMaxObjectSizeLimit(maxPushPackSizeBytes)
                             // Validates every object the client claims to send, catching
                             // a pack that lies about its own contents before anything
                             // in it is trusted.
@@ -198,6 +205,20 @@ fun Route.gitRoutes(
                                     // Applied before the ref moves, so a push that cannot
                                     // be written into the project is refused outright
                                     // rather than leaving the branch ahead of the files.
+                                    // This commits in its own transaction, separate from
+                                    // the ref CAS JGit performs after this hook returns, so
+                                    // a crash in between would leave the files ahead of the
+                                    // ref (not the reverse: the objects were already durably
+                                    // packed before this hook ran). withProjectLock already
+                                    // rules out a concurrent reader observing that gap during
+                                    // normal operation; a crash is not otherwise guarded
+                                    // against, since doing so would mean bringing JGit's own
+                                    // ref update inside this transaction, which it does not
+                                    // expose a way to do. In practice the client sees the
+                                    // push as failed and retries, and applyCommitToProject's
+                                    // unchanged-file skip makes that retry a no-op for
+                                    // anything the crashed attempt already wrote, so the ref
+                                    // catches up on the next try rather than diverging further.
                                     val failure = gitRepositoryService.applyCommitToProject(
                                         repository,
                                         authorization.projectId,
