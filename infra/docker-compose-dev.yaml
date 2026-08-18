@@ -73,6 +73,7 @@ services:
       dockerfile: infra/docker/backend/Dockerfile
     ports:
       - "8080:8080"
+      - "2222:2222"
     environment:
       DATABASE_URL: jdbc:postgresql://postgres-backend:5432/mdeo
       DATABASE_USER: mdeo

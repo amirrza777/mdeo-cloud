@@ -101,6 +101,14 @@ variable "jwt_public_key" {
   default     = null
 }
 
+variable "ssh_host_key" {
+  type        = string
+  description = "OpenSSH-format private key for the git-over-SSH server's host key. If null, a key pair is generated automatically and stored in Terraform state."
+  sensitive   = true
+  nullable    = true
+  default     = null
+}
+
 variable "max_langium_instances" {
   type        = number
   description = "Maximum number of Langium worker instances per JS service"

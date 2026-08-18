@@ -177,6 +177,74 @@
                     </CollapsibleContent>
                 </Collapsible>
 
+                <Collapsible v-model:open="isSshKeysSectionOpen" @update:open="handleSshKeysSectionToggle">
+                    <CollapsibleTrigger asChild>
+                        <Button variant="outline" class="w-full">
+                            <component :is="isSshKeysSectionOpen ? ChevronUp : ChevronDown" class="size-4" />
+                            <span>SSH keys</span>
+                        </Button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                        <div class="mt-4 space-y-4">
+                            <p class="text-xs text-muted-foreground">
+                                Register a public key to clone or push over git-over-SSH instead of HTTP.
+                            </p>
+
+                            <ul v-if="sshKeys.length > 0" class="space-y-2">
+                                <li
+                                    v-for="key in sshKeys"
+                                    :key="key.id"
+                                    class="flex items-center justify-between gap-2 rounded-lg border border-border/70 p-3"
+                                >
+                                    <div class="min-w-0">
+                                        <p class="truncate text-sm font-medium text-foreground">{{ key.name }}</p>
+                                        <p class="truncate text-xs text-muted-foreground font-mono">
+                                            {{ key.fingerprint }}
+                                        </p>
+                                    </div>
+                                    <Button
+                                        type="button"
+                                        variant="ghost"
+                                        size="icon"
+                                        class="h-8 w-8 shrink-0 text-destructive"
+                                        aria-label="Remove key"
+                                        :disabled="removingSshKeyId === key.id"
+                                        @click="handleRemoveSshKey(key.id)"
+                                    >
+                                        <Trash2 class="size-4" />
+                                    </Button>
+                                </li>
+                            </ul>
+
+                            <p v-else class="text-xs text-muted-foreground">No SSH keys yet.</p>
+
+                            <form class="space-y-2" @submit.prevent="handleAddSshKey">
+                                <Input
+                                    v-model="newSshKeyName"
+                                    placeholder="Key name, e.g. this laptop"
+                                />
+                                <textarea
+                                    v-model="newSshKeyValue"
+                                    placeholder="ssh-ed25519 AAAA... comment"
+                                    rows="3"
+                                    class="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-xs font-mono shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                                <Button
+                                    type="submit"
+                                    class="w-full"
+                                    :disabled="isAddingSshKey || !newSshKeyName.trim() || !newSshKeyValue.trim()"
+                                >
+                                    {{ isAddingSshKey ? "Adding…" : "Add key" }}
+                                </Button>
+                            </form>
+
+                            <Field v-if="sshKeysError">
+                                <FieldError :errors="[sshKeysError]" />
+                            </Field>
+                        </div>
+                    </CollapsibleContent>
+                </Collapsible>
+
                 <div class="flex flex-wrap justify-between gap-3">
                     <Button
                         type="button"
@@ -207,7 +275,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip
 import PasswordField from "@/components/auth/PasswordField.vue";
 import { Field, FieldContent, FieldError, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import type { PersonalAccessTokenCreated, PersonalAccessTokenInfo } from "@/data/api/areas/authApi";
+import type { PersonalAccessTokenCreated, PersonalAccessTokenInfo, SshPublicKeyInfo } from "@/data/api/areas/authApi";
 import { authStateKey } from "../workbench/util";
 
 const open = defineModel<boolean>("open", { default: false });
@@ -235,6 +303,14 @@ const isCreatingToken = ref(false);
 const createdToken = ref<PersonalAccessTokenCreated>();
 const isTokenCopied = ref(false);
 const revokingTokenId = ref<string>();
+
+const isSshKeysSectionOpen = ref(false);
+const sshKeys = ref<SshPublicKeyInfo[]>([]);
+const sshKeysError = ref<string>();
+const newSshKeyName = ref("");
+const newSshKeyValue = ref("");
+const isAddingSshKey = ref(false);
+const removingSshKeyId = ref<string>();
 
 const username = computed(() => authState.user.value?.username ?? "Unknown user");
 
@@ -333,6 +409,60 @@ async function handleRevokeToken(tokenId: string) {
         tokens.value = tokens.value.filter((token) => token.id !== tokenId);
     } finally {
         revokingTokenId.value = undefined;
+    }
+}
+
+async function loadSshKeys() {
+    sshKeysError.value = undefined;
+    const result = await authState.listSshKeys();
+    if (!result.success) {
+        sshKeysError.value = result.error.message;
+        return;
+    }
+    sshKeys.value = result.value;
+}
+
+async function handleSshKeysSectionToggle(open: boolean) {
+    if (open) {
+        await loadSshKeys();
+    }
+}
+
+async function handleAddSshKey() {
+    if (isAddingSshKey.value || !newSshKeyName.value.trim() || !newSshKeyValue.value.trim()) {
+        return;
+    }
+    sshKeysError.value = undefined;
+    isAddingSshKey.value = true;
+    try {
+        const result = await authState.addSshKey(newSshKeyName.value.trim(), newSshKeyValue.value.trim());
+        if (!result.success) {
+            sshKeysError.value = result.error.message;
+            return;
+        }
+        newSshKeyName.value = "";
+        newSshKeyValue.value = "";
+        await loadSshKeys();
+    } finally {
+        isAddingSshKey.value = false;
+    }
+}
+
+async function handleRemoveSshKey(keyId: string) {
+    if (removingSshKeyId.value) {
+        return;
+    }
+    sshKeysError.value = undefined;
+    removingSshKeyId.value = keyId;
+    try {
+        const result = await authState.removeSshKey(keyId);
+        if (!result.success) {
+            sshKeysError.value = result.error.message;
+            return;
+        }
+        sshKeys.value = sshKeys.value.filter((key) => key.id !== keyId);
+    } finally {
+        removingSshKeyId.value = undefined;
     }
 }
 

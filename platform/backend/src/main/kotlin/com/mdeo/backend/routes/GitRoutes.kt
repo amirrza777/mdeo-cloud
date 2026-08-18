@@ -1,6 +1,7 @@
 package com.mdeo.backend.routes
 
 import com.mdeo.backend.git.GitRepositoryService
+import com.mdeo.backend.git.parseProjectIdFromGitPath
 import com.mdeo.backend.service.AuthRateLimiter
 import com.mdeo.backend.service.PersonalAccessTokenService
 import com.mdeo.backend.service.ProjectPermission
@@ -325,9 +326,7 @@ private suspend fun ApplicationCall.authorizeGit(
     authRateLimiter: AuthRateLimiter,
     permission: ProjectPermission
 ): GitAuthorization? {
-    val projectId = parameters["projectId"]
-        ?.removeSuffix(".git")
-        ?.let { runCatching { UUID.fromString(it) }.getOrNull() }
+    val projectId = parameters["projectId"]?.let { parseProjectIdFromGitPath(it) }
     if (projectId == null) {
         respond(HttpStatusCode.NotFound, "Unknown repository")
         return null

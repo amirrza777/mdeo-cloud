@@ -85,4 +85,10 @@ interface InjectedServices {
      * HTTP basic authentication.
      */
     val personalAccessTokenService: PersonalAccessTokenService
+
+    /**
+     * Service for registering, listing, removing, and resolving SSH public
+     * keys used to authenticate git-over-SSH.
+     */
+    val sshKeyService: SshKeyService
 }

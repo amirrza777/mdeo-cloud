@@ -101,6 +101,14 @@ git clone https://<username>:<token>@<host>/git/<project-id>.git
 You need read access to clone and write access to push, the same permissions that govern the
 workbench itself.
 
+Git-over-SSH is also available, authenticated by public key instead of a password or token.
+Register a key from the **Account** dialog's **SSH keys** section, then clone with an explicit
+port (2222 is not the standard 22, so it can't be omitted):
+
+```
+git clone ssh://git@<host>:2222/<project-id>.git
+```
+
 A clone contains every project file, plus a `.mdeo` file listing the project's enabled
 plugins, so a fresh clone opened as a new project comes up with the same languages available.
 Changing that file over a push requires admin permission on the project, the same bar

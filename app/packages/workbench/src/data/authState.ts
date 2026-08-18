@@ -148,4 +148,30 @@ export class AuthState {
     async revokeToken(tokenId: string) {
         return this.backendApi.auth.revokeToken(tokenId);
     }
+
+    /**
+     * Registers a new SSH public key for the current user.
+     *
+     * @param name A label to tell this key apart from others later
+     * @param publicKey The full authorized_keys-format line
+     */
+    async addSshKey(name: string, publicKey: string) {
+        return this.backendApi.auth.addSshKey(name, publicKey);
+    }
+
+    /**
+     * Lists the current user's own registered SSH public keys.
+     */
+    async listSshKeys() {
+        return this.backendApi.auth.listSshKeys();
+    }
+
+    /**
+     * Removes one of the current user's own registered SSH public keys.
+     *
+     * @param keyId The key to remove
+     */
+    async removeSshKey(keyId: string) {
+        return this.backendApi.auth.removeSshKey(keyId);
+    }
 }

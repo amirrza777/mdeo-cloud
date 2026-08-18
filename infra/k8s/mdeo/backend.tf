@@ -17,10 +17,20 @@ resource "tls_private_key" "jwt_rsa" {
   rsa_bits  = 2048
 }
 
+# git-over-SSH host key: use the caller-supplied key or auto-generate once.
+# Ed25519 rather than RSA to match what a freshly `ssh-keygen`'d key would
+# use, and because the backend only needs the OpenSSH-format private key
+# this resource already produces directly - no PEM/DER conversion needed.
+resource "tls_private_key" "ssh_host" {
+  count     = var.ssh_host_key == null ? 1 : 0
+  algorithm = "ED25519"
+}
+
 locals {
   _session_key    = var.session_encryption_key != null ? var.session_encryption_key : random_id.session_key[0].hex
   _jwt_private_key = var.jwt_private_key != null ? var.jwt_private_key : tls_private_key.jwt_rsa[0].private_key_pem
   _jwt_public_key  = var.jwt_public_key != null ? var.jwt_public_key : tls_private_key.jwt_rsa[0].public_key_pem
+  _ssh_host_key    = var.ssh_host_key != null ? var.ssh_host_key : tls_private_key.ssh_host[0].private_key_openssh
 }
 
 resource "kubernetes_secret_v1" "backend_secrets" {
@@ -37,6 +47,7 @@ resource "kubernetes_secret_v1" "backend_secrets" {
     session_encryption_key = local._session_key
     jwt_private_key        = local._jwt_private_key
     jwt_public_key         = local._jwt_public_key
+    ssh_host_key            = local._ssh_host_key
   }
 }
 
@@ -61,6 +72,20 @@ resource "kubernetes_service_v1" "backend" {
       name        = "http"
       port        = 8080
       target_port = 8080
+      protocol    = "TCP"
+    }
+
+    # NOTE: this only reaches other pods in the cluster. The Gateway API
+    # HTTPRoute in gateway.tf is L7/HTTP-only and cannot carry raw SSH
+    # traffic, so making git-over-SSH reachable from outside the cluster
+    # still needs a separate L4 path (a LoadBalancer Service or a
+    # TCPRoute, depending on what the cluster's gateway implementation
+    # supports) that does not exist yet - not added here since it's
+    # specific to the target cluster's ingress setup.
+    port {
+      name        = "ssh"
+      port        = 2222
+      target_port = 2222
       protocol    = "TCP"
     }
   }
@@ -121,6 +146,10 @@ resource "kubernetes_deployment_v1" "backend" {
             container_port = 8080
             protocol       = "TCP"
           }
+          port {
+            container_port = 2222
+            protocol       = "TCP"
+          }
 
           # Database
           env {
@@ -174,6 +203,15 @@ resource "kubernetes_deployment_v1" "backend" {
               secret_key_ref {
                 name = kubernetes_secret_v1.backend_secrets.metadata[0].name
                 key  = "jwt_public_key"
+              }
+            }
+          }
+          env {
+            name = "GIT_SSH_HOST_KEY"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret_v1.backend_secrets.metadata[0].name
+                key  = "ssh_host_key"
               }
             }
           }
