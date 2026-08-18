@@ -75,7 +75,27 @@ object FilesTable : Table("files") {
     }
 }
 
+/**
+ * Tracks the next version number to use for a path, surviving that path's
+ * own row in [FilesTable] being deleted.
+ *
+ * A file's version resets to 1 on every insert, since [FilesTable] itself
+ * has nowhere to remember what it was before a delete. A cache entry
+ * elsewhere that recorded a dependency on that path at version 1 (the
+ * common case: a file created and never edited again) would then pass an
+ * equality check against a completely different later file at the same
+ * path, purely because both happen to be at version 1. This table exists
+ * so a path's version keeps counting up across a delete, not just within
+ * one row's lifetime, which is what actually makes "the same version" mean
+ * "the same content" again.
+ */
+object FileVersionCountersTable : Table("file_version_counters") {
+    val projectId = uuid("project_id").references(ProjectsTable.id, onDelete = ReferenceOption.CASCADE)
+    val path = varchar("path", 1024)
+    val nextVersion = integer("next_version").default(1)
 
+    override val primaryKey = PrimaryKey(projectId, path)
+}
 
 /**
  * File metadata table schema for storing additional metadata associated with files.

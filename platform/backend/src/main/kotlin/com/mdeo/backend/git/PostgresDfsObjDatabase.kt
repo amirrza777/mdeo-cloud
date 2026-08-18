@@ -48,14 +48,14 @@ class PostgresDfsObjDatabase(
     repository: PostgresDfsRepository
 ) : DfsObjDatabase(repository, DfsReaderOptions()) {
 
-    /**
-     * Pack names only have to be unique within a repository, so a counter
-     * combined with the current time is enough.
-     */
-    private var packCounter = 0
-
     override fun newPack(source: PackSource): DfsPackDescription {
-        val name = "pack-${System.currentTimeMillis()}-${packCounter++}"
+        // A random UUID rather than a timestamp+counter: this database is
+        // constructed fresh per openRepository call, so a counter restarts
+        // at 0 every time. Two operations on the same project within the
+        // same millisecond would otherwise both produce pack-<ms>-0, and
+        // since commitPackImpl upserts on (projectId, packName), the second
+        // one silently overwrites the first's bytes and metadata.
+        val name = "pack-${UUID.randomUUID()}"
         return NamedPackDescription(repository.description, name, source)
     }
 
@@ -76,6 +76,23 @@ class PostgresDfsObjDatabase(
     override fun listPacks(): MutableList<DfsPackDescription> {
         val project = projectId.toKotlinUuid()
         return transaction {
+            // One query for every pack's file metadata, grouped by pack name,
+            // rather than one query per pack: pack count grows with
+            // repository activity, so a per-pack query means every listPacks
+            // call (which JGit makes on essentially every object lookup)
+            // does linearly more database round trips. The `data` column
+            // itself is not selected here; openFile fetches it lazily, only
+            // for the pack a read actually reaches.
+            val filesByPack = GitPackFilesTable
+                .select(
+                    GitPackFilesTable.packName,
+                    GitPackFilesTable.ext,
+                    GitPackFilesTable.size,
+                    GitPackFilesTable.blockSize
+                )
+                .where { GitPackFilesTable.projectId eq project }
+                .groupBy { it[GitPackFilesTable.packName] }
+
             GitPacksTable
                 .selectAll()
                 .where { GitPacksTable.projectId eq project }
@@ -96,21 +113,15 @@ class PostgresDfsObjDatabase(
 
                     // Which extensions exist, and how big each is, has to be
                     // restored too, or JGit will not know the index is there.
-                    GitPackFilesTable
-                        .selectAll()
-                        .where {
-                            (GitPackFilesTable.projectId eq project) and
-                                (GitPackFilesTable.packName eq name)
+                    filesByPack[name]?.forEach { fileRow ->
+                        val ext = PackExt.valueOf(fileRow[GitPackFilesTable.ext])
+                        description.addFileExt(ext)
+                        description.setFileSize(ext, fileRow[GitPackFilesTable.size])
+                        val block = fileRow[GitPackFilesTable.blockSize]
+                        if (block > 0) {
+                            description.setBlockSize(ext, block)
                         }
-                        .forEach { fileRow ->
-                            val ext = PackExt.valueOf(fileRow[GitPackFilesTable.ext])
-                            description.addFileExt(ext)
-                            description.setFileSize(ext, fileRow[GitPackFilesTable.size])
-                            val block = fileRow[GitPackFilesTable.blockSize]
-                            if (block > 0) {
-                                description.setBlockSize(ext, block)
-                            }
-                        }
+                    }
                     description as DfsPackDescription
                 }
                 .toMutableList()
@@ -173,19 +184,27 @@ class PostgresDfsObjDatabase(
     override fun openFile(desc: DfsPackDescription, ext: PackExt): ReadableChannel {
         val project = projectId.toKotlinUuid()
         val name = desc.storedName
-        val bytes = transaction {
+
+        // A pack still buffered by this same database instance (just
+        // written, not yet committed) is read from memory: it is not in
+        // Postgres yet for a range read to reach. Anything already
+        // committed is read lazily instead, a block at a time, rather than
+        // loading the whole pack just to serve one object out of it.
+        pendingWrites[name]?.get(ext)?.let { return ByteArrayReadableChannel(it) }
+
+        val size = transaction {
             GitPackFilesTable
-                .selectAll()
+                .select(GitPackFilesTable.size)
                 .where {
                     (GitPackFilesTable.projectId eq project) and
                         (GitPackFilesTable.packName eq name) and
                         (GitPackFilesTable.ext eq ext.name)
                 }
                 .singleOrNull()
-                ?.get(GitPackFilesTable.data)
+                ?.get(GitPackFilesTable.size)
         } ?: throw FileNotFoundException("$name.${ext.getExtension()}")
 
-        return ByteArrayReadableChannel(bytes)
+        return PostgresPackReadableChannel(projectId, name, ext, size)
     }
 
     override fun writeFile(desc: DfsPackDescription, ext: PackExt): DfsOutputStream =

@@ -61,7 +61,15 @@ fun Application.module(appConfig: AppConfig) {
         override val executionService: ExecutionService by lazy { ExecutionService(this) }
         override val webSocketNotificationService: WebSocketNotificationService by lazy { WebSocketNotificationService() }
         override val languagePluginRequestService: LanguagePluginRequestService by lazy { LanguagePluginRequestService(this) }
-        val gitRepositoryService: GitRepositoryService by lazy { GitRepositoryService(fileService, pluginService) }
+        override val authRateLimiter: AuthRateLimiter by lazy { AuthRateLimiter() }
+        val gitRepositoryService: GitRepositoryService by lazy {
+            GitRepositoryService(
+                fileService,
+                pluginService,
+                appConfig.git.maxPushPackSizeBytes,
+                appConfig.git.maxProjectStorageBytes
+            )
+        }
     }
     
     services.jwtService.init()
@@ -108,7 +116,7 @@ fun Application.module(appConfig: AppConfig) {
     
     routing {
         healthRoutes()
-        authRoutes(services.userService, services.jwtService)
+        authRoutes(services.userService, services.jwtService, services.authRateLimiter)
 
         // Outside the session and JWT blocks on purpose: git clients cannot
         // present either, so these routes authenticate the HTTP basic
@@ -117,6 +125,8 @@ fun Application.module(appConfig: AppConfig) {
             services.gitRepositoryService,
             services.projectService,
             services.userService,
+            services.authRateLimiter,
+            services.webSocketNotificationService,
             appConfig.git.maxPushPackSizeBytes
         )
         

@@ -86,23 +86,21 @@ class PostgresDfsRefDatabase(
 
         return transaction {
             if (oldRef == null || oldRef.storage == Ref.Storage.NEW) {
-                // The caller expects this ref not to exist yet. If it does,
-                // somebody else created it first and this update has lost.
-                val existing = GitRefsTable
-                    .selectAll()
-                    .where { (GitRefsTable.projectId eq project) and (GitRefsTable.name eq name) }
-                    .count()
-                if (existing > 0) {
-                    return@transaction false
-                }
-                GitRefsTable.insert {
+                // The caller expects this ref not to exist yet. A plain
+                // existence check followed by an insert is not itself a
+                // compare-and-set: two first writers can both observe no
+                // row, after which one would fail with a primary key
+                // violation instead of correctly losing the race. Letting
+                // Postgres do the check atomically (a conflicting row is
+                // simply not inserted) is what actually makes this a CAS.
+                val inserted = GitRefsTable.insertIgnore {
                     it[GitRefsTable.projectId] = project
                     it[GitRefsTable.name] = name
                     it[GitRefsTable.objectId] = newObjectId
                     it[GitRefsTable.symTarget] = newSymTarget
                     it[GitRefsTable.updatedAt] = Instant.now()
                 }
-                return@transaction true
+                return@transaction inserted.insertedCount > 0
             }
 
             val expectedObjectId = if (oldRef.isSymbolic) null else oldRef.objectId?.name

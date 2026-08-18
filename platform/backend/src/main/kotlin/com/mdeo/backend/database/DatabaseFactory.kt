@@ -42,6 +42,7 @@ object DatabaseFactory {
                 ProjectsTable,
                 ProjectOwnersTable,
                 FilesTable,
+                FileVersionCountersTable,
                 FileMetadataTable,
                 PluginsTable,
                 ProjectPluginsTable,
