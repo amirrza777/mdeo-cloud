@@ -1,34 +1,24 @@
 import { BaseOperationHandler, OperationHandlerCommand, sharedImport } from "@mdeo/language-shared";
-import type { Command, GModelElement } from "@eclipse-glsp/server";
+import type { Command } from "@eclipse-glsp/server";
 import {
     MovePatternElementToConditionOperation,
-    ModelTransformationElementType,
     MAIN_PATTERN_TARGET,
     NEW_FORBID_TARGET,
     NEW_REQUIRE_TARGET
 } from "@mdeo/protocol-model-transformation";
-import type { ContextActionRequestContext, ContextItemProvider } from "@mdeo/language-shared";
-import type { ContextItem } from "@mdeo/protocol-common";
-import type { AstNode } from "langium";
 import type { WorkspaceEdit } from "vscode-languageserver-types";
+import { PatternApplicationCondition, type PatternType } from "../../../grammar/modelTransformationTypes.js";
+import { patternConditions } from "../modelTransformationPatternUtils.js";
 import {
-    Pattern,
-    PatternApplicationCondition,
-    PatternLink,
-    PatternObjectInstance,
-    PatternObjectInstanceReference,
-    WhereClause,
-    expressionTypes,
-    type PatternApplicationConditionType,
-    type PatternLinkType,
-    type PatternObjectInstanceType,
-    type PatternPropertyAssignmentType,
-    type PatternType
-} from "../../../grammar/modelTransformationTypes.js";
-import { conditionDisplayName, patternConditions } from "../modelTransformationPatternUtils.js";
+    canEnterCondition,
+    containerBraces,
+    movableComponent,
+    removedCstNodes,
+    type ConditionKind,
+    type PatternElementContainer
+} from "../modelTransformationConditionMoves.js";
 
 const { injectable } = sharedImport("inversify");
-const { AstUtils, GrammarUtils } = sharedImport("langium");
 
 /**
  * Handler that moves a pattern element into another application condition block, into a new
@@ -48,9 +38,15 @@ const { AstUtils, GrammarUtils } = sharedImport("langium");
  * element its grammar does not admit — and for a component whose names are still read by
  * what stays behind, since a block-local name means nothing outside its block. Leaving a
  * block does not leave an empty one behind either: a block goes with its last member.
+ *
+ * The destinations are offered in the "Change Modifier" menu of
+ * {@link ChangePatternElementModifierOperationHandler}: which block an element belongs to is
+ * what the `forbid` / `require` modifiers used to say, so the choice belongs next to the
+ * remaining modifiers rather than in a menu of its own. Both sides read the same rules from
+ * {@link modelTransformationConditionMoves}.
  */
 @injectable()
-export class MovePatternElementToConditionOperationHandler extends BaseOperationHandler implements ContextItemProvider {
+export class MovePatternElementToConditionOperationHandler extends BaseOperationHandler {
     override readonly operationType = MovePatternElementToConditionOperation.KIND;
 
     /**
@@ -73,40 +69,33 @@ export class MovePatternElementToConditionOperationHandler extends BaseOperation
             return undefined;
         }
 
-        const pattern = this.findPattern(astNode);
-        const container = this.findContainer(astNode);
-        if (pattern == undefined || container == undefined) {
+        const movable = movableComponent(astNode, this.reflection);
+        if (movable == undefined) {
             return undefined;
         }
 
-        const component = this.collectComponent(astNode, container);
-        if (component.length === 0 || !this.isSelfContained(component)) {
-            return undefined;
-        }
-        if (this.readsBlockLocalNames(component, container)) {
-            return undefined;
-        }
-
-        const target = this.resolveTarget(pattern, container, operation.target);
+        const target = this.resolveTarget(movable.pattern, movable.container, operation.target);
         if (target === undefined) {
             return undefined;
         }
-        if (this.entersCondition(target) && !this.canEnterCondition(component, container)) {
+        if (this.entersCondition(target) && !canEnterCondition(movable.elements, movable.container, this.reflection)) {
             return undefined;
         }
 
-        const movedText = component
+        const movedText = movable.elements
             .map((node) => node.$cstNode?.text)
             .filter((text): text is string => text != undefined && text.length > 0);
-        if (movedText.length !== component.length) {
+        if (movedText.length !== movable.elements.length) {
             return undefined;
         }
 
-        const edits = this.removeMovedElements(component, container);
+        const edits = removedCstNodes(movable.elements, movable.container, this.reflection).map((cstNode) =>
+            this.deleteCstNode(cstNode)
+        );
 
         const insertion =
             target.kind === "new"
-                ? this.insertNewBlock(pattern, target.conditionKind, movedText)
+                ? this.insertNewBlock(movable.pattern, target.conditionKind, movedText)
                 : this.insertIntoExisting(target.container, movedText);
         if (insertion == undefined) {
             return undefined;
@@ -117,509 +106,15 @@ export class MovePatternElementToConditionOperationHandler extends BaseOperation
     }
 
     /**
-     * Offers the move targets available for the selected element.
-     *
-     * The action is offered for locally declared instances and for links, and only when the
-     * whole component can move without breaking a reference. Destinations inside a block are
-     * left out when the component cannot live in one.
-     *
-     * @param element The selected element
-     * @param _context Additional request context
-     * @returns The context items for this handler, or an empty array when not applicable
-     */
-    getContextItems(element: GModelElement, _context: ContextActionRequestContext): ContextItem[] {
-        if (
-            element.type !== ModelTransformationElementType.NODE_PATTERN_INSTANCE &&
-            element.type !== ModelTransformationElementType.EDGE_PATTERN_LINK &&
-            element.type !== ModelTransformationElementType.LABEL_WHERE_CLAUSE
-        ) {
-            return [];
-        }
-
-        const astNode = this.index.getAstNode(element);
-        if (
-            astNode == undefined ||
-            (!this.reflection.isInstance(astNode, PatternObjectInstance) &&
-                !this.reflection.isInstance(astNode, PatternLink) &&
-                !this.reflection.isInstance(astNode, PatternObjectInstanceReference) &&
-                !this.reflection.isInstance(astNode, WhereClause))
-        ) {
-            return [];
-        }
-
-        const pattern = this.findPattern(astNode);
-        const container = this.findContainer(astNode);
-        if (pattern == undefined || container == undefined) {
-            return [];
-        }
-
-        const component = this.collectComponent(astNode, container);
-        if (component.length === 0 || !this.isSelfContained(component)) {
-            return [];
-        }
-        if (this.readsBlockLocalNames(component, container)) {
-            return [];
-        }
-
-        const currentCondition = this.reflection.isInstance(container, PatternApplicationCondition)
-            ? (container as PatternApplicationConditionType)
-            : undefined;
-        const canEnterCondition = this.canEnterCondition(component, container);
-
-        const children: ContextItem[] = [];
-
-        if (currentCondition != undefined) {
-            children.push({
-                id: `move-to-block-${element.id}-main`,
-                label: "Match Pattern",
-                icon: "square",
-                action: MovePatternElementToConditionOperation.create({
-                    elementId: element.id,
-                    target: MAIN_PATTERN_TARGET
-                })
-            });
-        }
-
-        const conditions = canEnterCondition ? patternConditions(pattern, this.reflection) : [];
-        for (const [index, condition] of conditions.entries()) {
-            if (condition === currentCondition) {
-                continue;
-            }
-            children.push({
-                id: `move-to-block-${element.id}-${index}`,
-                label: this.describeCondition(condition),
-                icon: condition.kind === "require" ? "square-check" : "square-slash",
-                action: MovePatternElementToConditionOperation.create({
-                    elementId: element.id,
-                    target: `${index}`
-                })
-            });
-        }
-
-        if (!canEnterCondition) {
-            return this.wrapChildren(element, children);
-        }
-
-        children.push({
-            id: `move-to-block-${element.id}-new-forbid`,
-            label: "New Forbid Block",
-            icon: "square-slash",
-            action: MovePatternElementToConditionOperation.create({
-                elementId: element.id,
-                target: NEW_FORBID_TARGET
-            })
-        });
-        children.push({
-            id: `move-to-block-${element.id}-new-require`,
-            label: "New Require Block",
-            icon: "square-check",
-            action: MovePatternElementToConditionOperation.create({
-                elementId: element.id,
-                target: NEW_REQUIRE_TARGET
-            })
-        });
-
-        return this.wrapChildren(element, children);
-    }
-
-    /**
-     * Wraps the available destinations in the "Move to Block" menu.
-     *
-     * @param element The selected element
-     * @param children The destinations offered for it
-     * @returns The context items, or an empty array when no destination remains
-     */
-    private wrapChildren(element: GModelElement, children: ContextItem[]): ContextItem[] {
-        if (children.length === 0) {
-            return [];
-        }
-        return [
-            {
-                id: `move-to-block-${element.id}`,
-                label: "Move to Block",
-                icon: "square-arrow-right",
-                sortString: "cb",
-                children
-            }
-        ];
-    }
-
-    /**
-     * Builds the label shown for a destination block.
-     *
-     * @param condition The condition block
-     * @returns The label for the context item
-     */
-    private describeCondition(condition: PatternApplicationConditionType): string {
-        const kind = condition.kind === "require" ? "Require" : "Forbid";
-        return `${kind} ${conditionDisplayName(condition, this.reflection)}`;
-    }
-
-    /**
-     * Returns the pattern a node belongs to.
-     *
-     * @param node The node to start from
-     * @returns The enclosing pattern, or `undefined`
-     */
-    private findPattern(node: AstNode): PatternType | undefined {
-        let current: AstNode | undefined = node.$container;
-        while (current != undefined) {
-            if (this.reflection.isInstance(current, Pattern)) {
-                return current as PatternType;
-            }
-            current = current.$container;
-        }
-        return undefined;
-    }
-
-    /**
-     * Returns the direct container of a pattern element: either the pattern itself or the
-     * condition block it is declared in.
-     *
-     * @param node The element
-     * @returns The container, or `undefined` when the node is not a pattern element
-     */
-    private findContainer(node: AstNode): PatternType | PatternApplicationConditionType | undefined {
-        const container = node.$container;
-        if (container == undefined) {
-            return undefined;
-        }
-        if (
-            this.reflection.isInstance(container, Pattern) ||
-            this.reflection.isInstance(container, PatternApplicationCondition)
-        ) {
-            return container as PatternType | PatternApplicationConditionType;
-        }
-        return undefined;
-    }
-
-    /**
-     * Collects the connected component of [start] inside its container.
-     *
-     * Instances are connected when a link of the same container joins them; a link belongs to
-     * the component of its endpoints. A link whose endpoints both live outside the container
-     * (an anchor-only link) forms a component on its own.
-     *
-     * A reference constrains a node of the enclosing pattern and a where clause constrains the
-     * graph as a whole; neither is part of the graph, so both move on their own.
-     *
-     * @param start The selected element
-     * @param container The container the element is declared in
-     * @returns The elements to move, in declaration order
-     */
-    private collectComponent(start: AstNode, container: PatternType | PatternApplicationConditionType): AstNode[] {
-        const elements = (container.elements ?? []) as AstNode[];
-        const localInstances = new Set<PatternObjectInstanceType>();
-        for (const element of elements) {
-            if (this.reflection.isInstance(element, PatternObjectInstance)) {
-                localInstances.add(element as PatternObjectInstanceType);
-            }
-        }
-
-        const reachedInstances = new Set<PatternObjectInstanceType>();
-        const reachedLinks = new Set<PatternLinkType>();
-
-        if (this.reflection.isInstance(start, PatternObjectInstance)) {
-            reachedInstances.add(start as PatternObjectInstanceType);
-        } else if (this.reflection.isInstance(start, PatternLink)) {
-            const link = start as PatternLinkType;
-            reachedLinks.add(link);
-            for (const endpoint of this.endpointsOf(link)) {
-                if (localInstances.has(endpoint)) {
-                    reachedInstances.add(endpoint);
-                }
-            }
-        } else {
-            return [start];
-        }
-
-        let changed = true;
-        while (changed) {
-            changed = false;
-            for (const element of elements) {
-                if (!this.reflection.isInstance(element, PatternLink)) {
-                    continue;
-                }
-                const link = element as PatternLinkType;
-                if (reachedLinks.has(link)) {
-                    continue;
-                }
-                const endpoints = this.endpointsOf(link).filter((endpoint) => localInstances.has(endpoint));
-                if (!endpoints.some((endpoint) => reachedInstances.has(endpoint))) {
-                    continue;
-                }
-                reachedLinks.add(link);
-                for (const endpoint of endpoints) {
-                    reachedInstances.add(endpoint);
-                }
-                changed = true;
-            }
-        }
-
-        return elements.filter(
-            (element) =>
-                reachedInstances.has(element as PatternObjectInstanceType) ||
-                reachedLinks.has(element as PatternLinkType)
-        );
-    }
-
-    /**
-     * Returns the resolved endpoint instances of a link.
-     *
-     * @param link The link
-     * @returns The resolved endpoints, skipping unresolved references
-     */
-    private endpointsOf(link: PatternLinkType): PatternObjectInstanceType[] {
-        const endpoints: PatternObjectInstanceType[] = [];
-        const source = link.source?.object?.ref as PatternObjectInstanceType | undefined;
-        const target = link.target?.object?.ref as PatternObjectInstanceType | undefined;
-        if (source != undefined) {
-            endpoints.push(source);
-        }
-        if (target != undefined) {
-            endpoints.push(target);
-        }
-        return endpoints;
-    }
-
-    /**
-     * Checks that nothing outside the moved component refers to one of its instances.
-     *
-     * A block-local node is invisible outside its block, so a move that leaves such a
-     * reference behind would turn a valid transformation into an unresolvable one. Rather
-     * than producing broken source, the move is not offered at all in that case.
-     *
-     * @param component The elements about to be moved
-     * @returns `true` when the move keeps every reference resolvable
-     */
-    private isSelfContained(component: AstNode[]): boolean {
-        const moved = new Set(component);
-        const movedInstances = component.filter((node) =>
-            this.reflection.isInstance(node, PatternObjectInstance)
-        ) as PatternObjectInstanceType[];
-        if (movedInstances.length === 0) {
-            return true;
-        }
-
-        const root = AstUtils.getDocument(component[0]).parseResult.value;
-        for (const node of AstUtils.streamAllContents(root)) {
-            if (moved.has(node)) {
-                continue;
-            }
-            for (const info of AstUtils.streamReferences(node)) {
-                const reference = info.reference as { ref?: AstNode };
-                const target = reference.ref;
-                if (
-                    target != undefined &&
-                    movedInstances.includes(target as PatternObjectInstanceType) &&
-                    !this.isInside(node, moved)
-                ) {
-                    return false;
-                }
-            }
-        }
-        return true;
-    }
-
-    /**
-     * Checks whether the moved component reads a name that only exists in its current block.
-     *
-     * A where clause such as `where s.duration > 30` is meaningful only where `s` is
-     * declared. Moving it out of the block that declares `s` would leave an unresolvable
-     * reference behind, so such a move is refused rather than performed and then flagged.
-     *
-     * Identifiers in expressions are resolved by the type system rather than by a Langium
-     * cross-reference, so they are matched against the block by name.
-     *
-     * @param component The elements about to be moved
-     * @param container The container the component currently lives in
-     * @returns `true` when the component depends on a node declared in its current block
-     */
-    private readsBlockLocalNames(
-        component: AstNode[],
-        container: PatternType | PatternApplicationConditionType
-    ): boolean {
-        if (!this.reflection.isInstance(container, PatternApplicationCondition)) {
-            return false;
-        }
-
-        const blockInstances = new Set<AstNode>(
-            ((container as PatternApplicationConditionType).elements ?? []).filter((element) =>
-                this.reflection.isInstance(element, PatternObjectInstance)
-            ) as AstNode[]
-        );
-        const moved = new Set(component);
-
-        for (const node of component) {
-            for (const contained of [node, ...AstUtils.streamAllContents(node)]) {
-                for (const info of AstUtils.streamReferences(contained)) {
-                    const target = (info.reference as { ref?: AstNode }).ref;
-                    if (target != undefined && blockInstances.has(target) && !moved.has(target)) {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        const stayingNames = new Set(
-            [...blockInstances]
-                .filter((instance) => !moved.has(instance))
-                .map((instance) => (instance as PatternObjectInstanceType).name)
-                .filter((name): name is string => name != undefined)
-        );
-        return component.some((node) => this.readsAnyName(node, stayingNames));
-    }
-
-    /**
-     * Checks whether anything staying behind still reads a name the component takes with it.
-     *
-     * The names of a block belong to the block alone, so a component that moves into one takes
-     * its names out of sight of everything it leaves behind. A property constraint or a where
-     * clause that still reads such a name would be left unresolvable, so the move is refused
-     * instead.
-     *
-     * @param component The elements about to be moved
-     * @param container The container the component currently lives in
-     * @returns `true` when an element staying behind reads a name of the component
-     */
-    private leavesReadersBehind(
-        component: AstNode[],
-        container: PatternType | PatternApplicationConditionType
-    ): boolean {
-        const movedNames = new Set(
-            component
-                .filter((node) => this.reflection.isInstance(node, PatternObjectInstance))
-                .map((node) => (node as PatternObjectInstanceType).name)
-                .filter((name): name is string => name != undefined)
-        );
-        if (movedNames.size === 0) {
-            return false;
-        }
-
-        const moved = new Set(component);
-        return ((container.elements ?? []) as AstNode[]).some(
-            (element) => !moved.has(element) && this.readsAnyName(element, movedNames)
-        );
-    }
-
-    /**
-     * Checks whether a node reads one of the given names in one of its expressions.
-     *
-     * @param node The node to scan, including everything nested inside it
-     * @param names The names to look for
-     * @returns `true` when an identifier expression below the node carries one of the names
-     */
-    private readsAnyName(node: AstNode, names: Set<string>): boolean {
-        if (names.size === 0) {
-            return false;
-        }
-        for (const contained of [node, ...AstUtils.streamAllContents(node)]) {
-            if (
-                this.reflection.isInstance(contained, expressionTypes.identifierExpressionType) &&
-                names.has((contained as { name?: string }).name ?? "")
-            ) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    /**
      * Checks whether a destination lies inside an application condition block.
      *
      * @param target The resolved destination
      * @returns `true` when the component would end up inside a block
      */
     private entersCondition(
-        target:
-            | { kind: "existing"; container: PatternType | PatternApplicationConditionType }
-            | { kind: "new"; conditionKind: "forbid" | "require" }
+        target: { kind: "existing"; container: PatternElementContainer } | { kind: "new"; conditionKind: ConditionKind }
     ): boolean {
         return target.kind === "new" || this.reflection.isInstance(target.container, PatternApplicationCondition);
-    }
-
-    /**
-     * Checks whether the component may live inside an application condition block.
-     *
-     * A block holds a plain sub-graph and the constraints on it: no modifier, since a
-     * condition never rewrites the model, no property assignment for the same reason, and only
-     * the elements its grammar admits. A component that carries any of those, or whose names
-     * are still read by what stays behind, has no valid form inside a block, so the block
-     * destinations are not offered for it.
-     *
-     * @param component The elements about to be moved
-     * @param container The container the component currently lives in
-     * @returns `true` when the component can be moved into a block
-     */
-    private canEnterCondition(component: AstNode[], container: PatternType | PatternApplicationConditionType): boolean {
-        for (const node of component) {
-            if (
-                !this.reflection.isInstance(node, PatternObjectInstance) &&
-                !this.reflection.isInstance(node, PatternObjectInstanceReference) &&
-                !this.reflection.isInstance(node, PatternLink) &&
-                !this.reflection.isInstance(node, WhereClause)
-            ) {
-                return false;
-            }
-            const modifier = (node as { modifier?: { modifier?: string } }).modifier?.modifier;
-            if (modifier != undefined) {
-                return false;
-            }
-            const properties = (node as { properties?: PatternPropertyAssignmentType[] }).properties ?? [];
-            if (properties.some((property) => property.operator === "=")) {
-                return false;
-            }
-        }
-
-        return !this.leavesReadersBehind(component, container);
-    }
-
-    /**
-     * Builds the edits cutting the moved elements out of their current container.
-     *
-     * A block that loses its last member is removed with it: an empty block is rejected by the
-     * validator, and a condition that constrains nothing has nothing left to say either.
-     *
-     * @param component The elements about to be moved
-     * @param container The container the component currently lives in
-     * @returns The edits removing the component from its container
-     */
-    private removeMovedElements(
-        component: AstNode[],
-        container: PatternType | PatternApplicationConditionType
-    ): WorkspaceEdit[] {
-        const moved = new Set(component);
-        const staying = ((container.elements ?? []) as AstNode[]).filter((element) => !moved.has(element));
-        const containerCstNode = (container as AstNode).$cstNode;
-        if (
-            staying.length === 0 &&
-            this.reflection.isInstance(container, PatternApplicationCondition) &&
-            containerCstNode != undefined
-        ) {
-            return [this.deleteCstNode(containerCstNode)];
-        }
-
-        return component
-            .map((node) => (node.$cstNode != undefined ? this.deleteCstNode(node.$cstNode) : undefined))
-            .filter((edit): edit is WorkspaceEdit => edit != undefined);
-    }
-
-    /**
-     * Checks whether a node is contained in one of the moved elements.
-     *
-     * @param node The node to check
-     * @param moved The moved elements
-     * @returns `true` when the node is one of them or nested inside one
-     */
-    private isInside(node: AstNode, moved: Set<AstNode>): boolean {
-        let current: AstNode | undefined = node;
-        while (current != undefined) {
-            if (moved.has(current)) {
-                return true;
-            }
-            current = current.$container;
-        }
-        return false;
     }
 
     /**
@@ -633,11 +128,11 @@ export class MovePatternElementToConditionOperationHandler extends BaseOperation
      */
     private resolveTarget(
         pattern: PatternType,
-        container: PatternType | PatternApplicationConditionType,
+        container: PatternElementContainer,
         target: string
     ):
-        | { kind: "existing"; container: PatternType | PatternApplicationConditionType }
-        | { kind: "new"; conditionKind: "forbid" | "require" }
+        | { kind: "existing"; container: PatternElementContainer }
+        | { kind: "new"; conditionKind: ConditionKind }
         | undefined {
         if (target === MAIN_PATTERN_TARGET) {
             return container === pattern ? undefined : { kind: "existing", container: pattern };
@@ -665,20 +160,12 @@ export class MovePatternElementToConditionOperationHandler extends BaseOperation
      * @param movedText The source text of the moved elements
      * @returns The workspace edit, or `undefined` when the container has no braces
      */
-    private insertIntoExisting(
-        container: PatternType | PatternApplicationConditionType,
-        movedText: string[]
-    ): WorkspaceEdit | undefined {
-        const cstNode = container.$cstNode;
-        if (cstNode == undefined) {
+    private insertIntoExisting(container: PatternElementContainer, movedText: string[]): WorkspaceEdit | undefined {
+        const braces = containerBraces(container);
+        if (braces == undefined) {
             return undefined;
         }
-        const openBrace = GrammarUtils.findNodeForKeyword(cstNode, "{");
-        const closeBrace = GrammarUtils.findNodeForKeyword(cstNode, "}");
-        if (openBrace == undefined || closeBrace == undefined) {
-            return undefined;
-        }
-        return this.insertIntoScope(openBrace, closeBrace, true, movedText.join("\n"));
+        return this.insertIntoScope(braces.open, braces.close, true, movedText.join("\n"));
     }
 
     /**
@@ -691,20 +178,15 @@ export class MovePatternElementToConditionOperationHandler extends BaseOperation
      */
     private insertNewBlock(
         pattern: PatternType,
-        conditionKind: "forbid" | "require",
+        conditionKind: ConditionKind,
         movedText: string[]
     ): WorkspaceEdit | undefined {
-        const cstNode = pattern.$cstNode;
-        if (cstNode == undefined) {
-            return undefined;
-        }
-        const openBrace = GrammarUtils.findNodeForKeyword(cstNode, "{");
-        const closeBrace = GrammarUtils.findNodeForKeyword(cstNode, "}");
-        if (openBrace == undefined || closeBrace == undefined) {
+        const braces = containerBraces(pattern);
+        if (braces == undefined) {
             return undefined;
         }
 
         const body = movedText.map((text) => `    ${text}`).join("\n");
-        return this.insertIntoScope(openBrace, closeBrace, true, `${conditionKind} {\n${body}\n}`);
+        return this.insertIntoScope(braces.open, braces.close, true, `${conditionKind} {\n${body}\n}`);
     }
 }

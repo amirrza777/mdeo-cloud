@@ -485,8 +485,8 @@ export class CreatePatternInstanceOperationHandler
      *
      * Every node created in `forbid` / `require` mode starts out in a block of its own, so
      * that it rejects (or demands) a match independently of the other conditions. Blocks are
-     * merged afterwards through the "Move to Block" action, which is the only way to express
-     * that two elements must be found *together*.
+     * merged afterwards by moving one into the other's block, which is the only way to
+     * express that two elements must be found *together*.
      *
      * @param pattern The pattern receiving the new block
      * @param conditionKind Whether a `forbid` or a `require` block is created
