@@ -66,6 +66,7 @@ import {
     patternModifierKind,
     type FlattenedPatternElement
 } from "./modelTransformationPatternUtils.js";
+import { stereotypeText, whereClauseLabelText } from "./modelTransformationLabelFormat.js";
 
 const { injectable } = sharedImport("inversify");
 const { GGraph } = sharedImport("@eclipse-glsp/server");
@@ -349,7 +350,7 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
 
             const modifierLabel = GPatternModifierLabel.builder()
                 .id(`${nodeId}__modifier-label`)
-                .text(`\u00ab${stereotype ?? modifier}\u00bb`)
+                .text(stereotypeText(stereotype ?? modifier))
                 .build();
             modifierCompartment.children.push(modifierLabel);
 
@@ -501,7 +502,7 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
 
         const modifierLabel = GPatternModifierLabel.builder()
             .id(`${nodeId}__modifier-label`)
-            .text(`\u00ab${PatternModifierKind.DELETE}\u00bb`)
+            .text(stereotypeText(PatternModifierKind.DELETE))
             .readonly(true)
             .build();
         modifierCompartment.children.push(modifierLabel);
@@ -640,8 +641,10 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
                 const whereId = idRegistry.getId(element);
                 const exprText = element.expression?.$cstNode?.text ?? "?";
                 const stereotype = this.getConditionStereotype(condition);
-                const prefix = stereotype != undefined ? `\u00ab${stereotype}\u00bb ` : "";
-                const label = GWhereClauseLabel.builder().id(whereId).text(`${prefix}where ${exprText}`).build();
+                const label = GWhereClauseLabel.builder()
+                    .id(whereId)
+                    .text(whereClauseLabelText(exprText, stereotype))
+                    .build();
                 whereClauseLabels.push(label);
             }
         }
@@ -829,7 +832,7 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
 
             const modifierLabel = GPatternLinkModifierLabel.builder()
                 .id(`${edgeId}__modifier-label`)
-                .text(`\u00ab${stereotype ?? modifier}\u00bb`)
+                .text(stereotypeText(stereotype ?? modifier))
                 .build();
 
             modifierNode.children.push(modifierLabel);

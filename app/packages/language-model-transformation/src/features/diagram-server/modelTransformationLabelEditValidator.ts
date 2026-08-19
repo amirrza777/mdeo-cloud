@@ -17,8 +17,9 @@ import {
     parseVariableLabel,
     parseVariableReassignmentLabel,
     parseModelTransformationPropertyLabel as parsePropertyLabel,
-    stripConditionStereotype
-} from "./modelTransformationLabelParseUtils.js";
+    extractWhereClauseExpression,
+    parseModifierText
+} from "./modelTransformationLabelFormat.js";
 import { NEW_PROPERTY_COMPARISON_LABEL_PREFIX } from "./handler/addPropertyValueComparisonOperationHandler.js";
 import {
     NEW_VARIABLE_LABEL_PREFIX,
@@ -300,9 +301,9 @@ export class ModelTransformationLabelEditValidator extends BaseLabelEditValidato
     /**
      * Validates a where clause label.
      *
-     * Only checks that the text starts with the required `where ` prefix — after an optional
-     * block stereotype — and that the expression is non-empty.  The expression itself is not
-     * further validated (parsing expressions is out of scope for now).
+     * Only checks that the label states a clause at all and that its expression is
+     * non-empty.  The expression itself is not further validated (parsing expressions is out
+     * of scope for now).
      *
      * @param label The label text to validate
      * @returns A validation status if invalid, undefined if valid
@@ -312,11 +313,10 @@ export class ModelTransformationLabelEditValidator extends BaseLabelEditValidato
             return undefined;
         }
 
-        const text = stripConditionStereotype(label);
-        if (!text.startsWith("where ")) {
+        const expression = extractWhereClauseExpression(label);
+        if (expression == undefined) {
             return this.error("Where clause must start with 'where '.");
         }
-        const expression = text.substring("where ".length).trim();
         if (expression.length === 0) {
             return this.error("Where clause expression cannot be empty.");
         }
@@ -560,22 +560,11 @@ export class ModelTransformationLabelEditValidator extends BaseLabelEditValidato
      * @returns A validation status if invalid, undefined if valid
      */
     private validateModifierLabel(label: string): ValidationStatusType | undefined {
-        const modifier = this.parseModifierText(label);
+        const modifier = parseModifierText(label);
         if (!this.isValidModifier(modifier)) {
             return this.error("Modifier must be one of: create, delete, forbid, require (or empty for none).");
         }
         return undefined;
-    }
-
-    /**
-     * Strips guillemet characters and trims the label to extract the modifier value.
-     */
-    private parseModifierText(label: string): string {
-        return label
-            .replace(/\u00ab/g, "")
-            .replace(/\u00bb/g, "")
-            .trim()
-            .toLowerCase();
     }
 
     /**
