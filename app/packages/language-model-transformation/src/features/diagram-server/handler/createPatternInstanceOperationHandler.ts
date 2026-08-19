@@ -38,7 +38,11 @@ import {
     PatternApplicationCondition,
     type PatternApplicationConditionType
 } from "../../../grammar/modelTransformationTypes.js";
-import { ModelTransformationElementType, PatternModifierKind } from "@mdeo/protocol-model-transformation";
+import {
+    ModelTransformationElementType,
+    NodeCreationMode,
+    PatternModifierKind
+} from "@mdeo/protocol-model-transformation";
 import type { ModelTransformationMetadataManager } from "../modelTransformationMetadataManager.js";
 import type { ModelTransformationGModelFactory } from "../modelTransformationGModelFactory.js";
 import { findContainingCondition } from "../modelTransformationPatternUtils.js";
@@ -74,11 +78,6 @@ const { CreateNodeOperation: CreateNodeOperationKind, TriggerNodeCreationAction 
     sharedImport("@eclipse-glsp/protocol");
 const { GModelFactory } = sharedImport("@eclipse-glsp/server");
 const { AstUtils } = sharedImport("langium");
-
-/**
- * The modifier arg value used for persist mode (no modifier keyword in grammar).
- */
-const MODIFIER_PERSIST = "persist";
 
 /**
  * Operation handler for creating new pattern object instances in a model transformation diagram.
@@ -125,13 +124,13 @@ export class CreatePatternInstanceOperationHandler
 
         const actionType = operation.args?.actionType as string | undefined;
         const instanceName = operation.args?.instanceName as string | undefined;
-        const modifier = operation.args?.modifier as string | undefined;
+        const modifier = operation.args?.modifier as NodeCreationMode | undefined;
 
         let workspaceEdit: WorkspaceEdit;
         let insertedNode: AstNode;
 
         if (actionType === "add-instance" && instanceName) {
-            if (modifier === "delete") {
+            if (modifier === NodeCreationMode.DELETE) {
                 const deleteNode = this.createDeleteAst(instanceName);
                 workspaceEdit = await this.insertIntoPattern(pattern, deleteNode);
                 insertedNode = deleteNode;
@@ -189,8 +188,8 @@ export class CreatePatternInstanceOperationHandler
      * @param args Args from the toolbox request, including `mode` (NodeCreationMode value).
      */
     async getToolboxItems(args: Args | undefined): Promise<GroupedToolboxItem[]> {
-        const mode = (args?.mode as string | undefined) ?? MODIFIER_PERSIST;
-        const classes = this.getAvailableClasses(mode !== "create");
+        const mode = (args?.mode as NodeCreationMode | undefined) ?? NodeCreationMode.PERSIST;
+        const classes = this.getAvailableClasses(mode !== NodeCreationMode.CREATE);
         const items: GroupedToolboxItem[] = [];
 
         for (const classInfo of classes) {
@@ -217,9 +216,9 @@ export class CreatePatternInstanceOperationHandler
             });
         }
 
-        if (mode === MODIFIER_PERSIST || mode === "delete") {
+        if (mode === NodeCreationMode.PERSIST || mode === NodeCreationMode.DELETE) {
             const existingInstances = this.getAllPatternObjectInstances();
-            const isDeleteMode = mode === "delete";
+            const isDeleteMode = mode === NodeCreationMode.DELETE;
             for (const instance of existingInstances) {
                 const name = instance.name;
                 if (name == undefined) {
@@ -476,8 +475,8 @@ export class CreatePatternInstanceOperationHandler
      * @param mode The creation mode from the toolbox
      * @returns `"forbid"` / `"require"`, or `undefined`
      */
-    private getConditionKind(mode: string | undefined): "forbid" | "require" | undefined {
-        if (mode === "forbid" || mode === "require") {
+    private getConditionKind(mode: NodeCreationMode | undefined): "forbid" | "require" | undefined {
+        if (mode === NodeCreationMode.FORBID || mode === NodeCreationMode.REQUIRE) {
             return mode;
         }
         return undefined;

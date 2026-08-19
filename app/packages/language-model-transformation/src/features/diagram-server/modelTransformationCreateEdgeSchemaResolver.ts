@@ -24,6 +24,7 @@ import { GPatternLinkEdge } from "./model/patternLinkEdge.js";
 import { GPatternLinkEndNode } from "./model/patternLinkEndNode.js";
 import { GPatternLinkEndLabel } from "./model/patternLinkEndLabel.js";
 import { ModelTransformationElementType, PatternModifierKind } from "@mdeo/protocol-model-transformation";
+import type { PatternLinkCreationContext } from "@mdeo/protocol-model-transformation";
 import type { GModelElementSchema } from "@eclipse-glsp/protocol";
 import type { PatternLinkSchemaParams } from "./handler/createPatternLinkOperationHandler.js";
 import {
@@ -35,18 +36,6 @@ import {
 
 const { injectable, inject } = sharedImport("inversify");
 const { ModelState: ModelStateKey, GModelIndex: GModelIndexKey } = sharedImport("@eclipse-glsp/server");
-
-/**
- * Context payload forwarded by the client's {@code PatternLinkContextProvider}.
- * Carries the currently active creation mode so the server can pre-select the
- * edge modifier for persist-persist pairs.
- */
-interface PatternLinkCreationContext {
-    /**
-     * The active node creation mode string (e.g. `"persist"`, `"create"`, `"delete"`).
-     */
-    mode?: string;
-}
 
 /**
  * Create-edge schema resolver for model transformation diagrams.

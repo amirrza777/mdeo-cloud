@@ -50,7 +50,7 @@ const { AstUtils, GrammarUtils } = sharedImport("langium");
  */
 @injectable()
 export class MovePatternElementToConditionOperationHandler extends BaseOperationHandler implements ContextItemProvider {
-    override readonly operationType = "movePatternElementToCondition";
+    override readonly operationType = MovePatternElementToConditionOperation.KIND;
 
     /**
      * Creates the command that performs the move.

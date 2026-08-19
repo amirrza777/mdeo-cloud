@@ -142,3 +142,46 @@ export enum EndNodeKind {
      */
     KILL = "kill"
 }
+
+/**
+ * The mode the model transformation toolbox creates pattern elements in.
+ *
+ * The value is chosen in the editor and travels to the server as the `mode` of a toolbox
+ * request or of the create-edge context. Its values coincide with the modifier keywords of
+ * the grammar, except for {@link NodeCreationMode.PERSIST}, which stands for no modifier at
+ * all, and for {@link NodeCreationMode.REQUIRE} / {@link NodeCreationMode.FORBID}, which are
+ * no longer element modifiers: an element created in one of those modes goes into an
+ * application condition block of its own.
+ */
+export enum NodeCreationMode {
+    /** No modifier — the element is matched as it is. */
+    PERSIST = "persist",
+    /** The element is created by the transformation. */
+    CREATE = "create",
+    /** The element is deleted by the transformation. */
+    DELETE = "delete",
+    /** The element goes into a `require` block. */
+    REQUIRE = "require",
+    /** The element goes into a `forbid` block. */
+    FORBID = "forbid"
+}
+
+/**
+ * The create-edge context the model transformation editor sends with a connection request.
+ */
+export interface PatternLinkCreationContext {
+    /** The creation mode selected in the toolbox. */
+    mode?: NodeCreationMode;
+}
+
+/**
+ * The icons the model transformation editor draws itself, rather than taking them from the
+ * icon library.
+ *
+ * A context item names its icon on the server and the editor's icon registry resolves the
+ * name; a name that neither side agrees on renders nothing, so both sides read it from here.
+ */
+export enum ModelTransformationIcon {
+    /** A plus sign, marking the addition of a variable. */
+    VARIABLE_PLUS = "variable-plus"
+}

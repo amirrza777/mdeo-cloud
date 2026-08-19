@@ -30,7 +30,7 @@ const { TextEdit } = sharedImport("vscode-languageserver-types");
  */
 @injectable()
 export class ChangePatternElementModifierOperationHandler extends BaseOperationHandler implements ContextItemProvider {
-    override readonly operationType = "changePatternElementModifier";
+    override readonly operationType = ChangePatternElementModifierOperation.KIND;
 
     /**
      * Creates a command to apply a modifier change on the target pattern element.

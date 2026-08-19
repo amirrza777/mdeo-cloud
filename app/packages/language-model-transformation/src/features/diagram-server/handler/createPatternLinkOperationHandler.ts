@@ -5,7 +5,7 @@ import {
     DefaultModelIdRegistry,
     type ModelIdRegistry
 } from "@mdeo/language-shared";
-import type { CreateEdgeOperation } from "@mdeo/protocol-common";
+import { CreateEdgeOperation } from "@mdeo/protocol-common";
 import { LinkAssociationResolver, type LinkAssociationDisambiguation } from "@mdeo/language-model";
 import type { AstNode } from "langium";
 import type { CompositeCstNode } from "langium";
@@ -88,7 +88,7 @@ interface ResolvedPatternInstance {
  */
 @injectable()
 export class CreatePatternLinkOperationHandler extends BaseCreateEdgeOperationHandler {
-    override readonly operationType = "createEdge";
+    override readonly operationType = CreateEdgeOperation.KIND;
     override label = "Create pattern link";
     readonly elementTypeIds = [ModelTransformationElementType.EDGE_PATTERN_LINK];
 

@@ -6,9 +6,7 @@ import {
     sharedImport
 } from "@mdeo/language-shared";
 import type { Command, GModelElement } from "@eclipse-glsp/server";
-import type { AddWhereClauseOperation } from "@mdeo/protocol-model-transformation";
-import { AddWhereClauseOperation as AddWhereClause } from "@mdeo/protocol-model-transformation";
-import { ModelTransformationElementType } from "@mdeo/protocol-model-transformation";
+import { AddWhereClauseOperation, ModelTransformationElementType } from "@mdeo/protocol-model-transformation";
 import type { ContextActionRequestContext, ContextItemProvider } from "@mdeo/language-shared";
 import type { ContextItem } from "@mdeo/protocol-common";
 import { InsertNewLabelAction } from "@mdeo/protocol-common";
@@ -55,7 +53,7 @@ export const NEW_WHERE_CLAUSE_CONDITION_SEPARATOR = "__condition-";
  */
 @injectable()
 export class AddWhereClauseOperationHandler extends BaseOperationHandler implements ContextItemProvider {
-    override readonly operationType = "addWhereClause";
+    override readonly operationType = AddWhereClauseOperation.KIND;
 
     /**
      * Creates a command for add-where-clause operations.
@@ -267,7 +265,7 @@ export class AddWhereClauseOperationHandler extends BaseOperationHandler impleme
             .id(labelId)
             .text("")
             .isNewLabel(true)
-            .newLabelOperationKind(AddWhereClause.NEW_LABEL_KIND)
+            .newLabelOperationKind(AddWhereClauseOperation.NEW_LABEL_KIND)
             .newLabelParentElementId(nodeId);
         if (conditionIndex != undefined) {
             builder.newLabelOperationArgs({ conditionIndex });
