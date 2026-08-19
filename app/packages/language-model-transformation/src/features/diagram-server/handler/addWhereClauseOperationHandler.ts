@@ -7,6 +7,7 @@ import {
 } from "@mdeo/language-shared";
 import type { Command, GModelElement } from "@eclipse-glsp/server";
 import type { AddWhereClauseOperation } from "@mdeo/protocol-model-transformation";
+import { AddWhereClauseOperation as AddWhereClause } from "@mdeo/protocol-model-transformation";
 import { ModelTransformationElementType } from "@mdeo/protocol-model-transformation";
 import type { ContextActionRequestContext, ContextItemProvider } from "@mdeo/language-shared";
 import type { ContextItem } from "@mdeo/protocol-common";
@@ -26,9 +27,23 @@ const { GrammarUtils } = sharedImport("langium");
 
 /**
  * Prefix used to build unique IDs for new-where-clause placeholder labels.
- * The full label ID is `${NEW_WHERE_CLAUSE_LABEL_PREFIX}${matchNodeId}`.
+ * The full label ID is `${NEW_WHERE_CLAUSE_LABEL_PREFIX}${matchNodeId}`, followed by
+ * {@link NEW_WHERE_CLAUSE_CONDITION_SEPARATOR} and the block index for a clause of an
+ * application condition block.
  */
 export const NEW_WHERE_CLAUSE_LABEL_PREFIX = "__new-label-whereclause-";
+
+/**
+ * Separates the match node ID from the block index in a new-where-clause placeholder label ID.
+ *
+ * A clause of a block has to be told apart from a clause of the match, and from a clause of
+ * another block of the same match: they sit on the same node, so the node ID alone names them
+ * all. The ID is also the only thing that reaches the label edit validator — a placeholder
+ * label exists in the client model alone, so the validation request carries its ID and its
+ * text and nothing else — which is where the index will be needed once a clause is validated
+ * against the names its block declares rather than by its shape alone.
+ */
+export const NEW_WHERE_CLAUSE_CONDITION_SEPARATOR = "__condition-";
 
 /**
  * Handler for adding where clause entries on match nodes and on their application condition
@@ -235,23 +250,30 @@ export class AddWhereClauseOperationHandler extends BaseOperationHandler impleme
      * - `__where-clauses` already exists: appends the label to the end of that compartment.
      *
      * @param element The match-node GModel element.
-     * @param conditionIndex The condition block the clause is written into, if any. It travels
-     *        with the label so that the commit knows where the text belongs.
+     * @param conditionIndex The condition block the clause is written into, if any. A block is
+     *        not a GModel element of its own, so it cannot be named by the label's parent ID:
+     *        it names the placeholder's ID, which is what the label edit validator is given,
+     *        and travels to the commit as an operation argument.
      * @returns The {@link InsertNewLabelAction} to dispatch.
      */
     private buildInsertWhereClauseAction(element: GModelElement, conditionIndex?: number): InsertNewLabelAction {
         const nodeId = element.id;
-        const labelId = `${NEW_WHERE_CLAUSE_LABEL_PREFIX}${nodeId}`;
+        const labelId =
+            conditionIndex != undefined
+                ? `${NEW_WHERE_CLAUSE_LABEL_PREFIX}${nodeId}${NEW_WHERE_CLAUSE_CONDITION_SEPARATOR}${conditionIndex}`
+                : `${NEW_WHERE_CLAUSE_LABEL_PREFIX}${nodeId}`;
 
-        const label = GWhereClauseLabel.builder()
+        const builder = GWhereClauseLabel.builder()
             .id(labelId)
             .text("")
             .isNewLabel(true)
-            .newLabelOperationKind(
-                conditionIndex != undefined ? `add-where-clause:${conditionIndex}` : "add-where-clause"
-            )
-            .newLabelParentElementId(nodeId)
-            .build();
+            .newLabelOperationKind(AddWhereClause.NEW_LABEL_KIND)
+            .newLabelParentElementId(nodeId);
+        if (conditionIndex != undefined) {
+            builder.newLabelOperationArgs({ conditionIndex });
+        }
+
+        const label = builder.build();
         label.editMode = true;
 
         const compartmentsId = `${nodeId}__compartments`;

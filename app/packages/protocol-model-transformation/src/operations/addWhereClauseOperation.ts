@@ -33,6 +33,12 @@ export namespace AddWhereClauseOperation {
     export const KIND = "addWhereClause";
 
     /**
+     * Identifier carried in `newLabelOperationKind` by a new where-clause placeholder label,
+     * by which the label view recognises a label it has to commit through this operation.
+     */
+    export const NEW_LABEL_KIND = "add-where-clause";
+
+    /**
      * Payload for creating an add-where-clause operation.
      */
     export interface Options {
