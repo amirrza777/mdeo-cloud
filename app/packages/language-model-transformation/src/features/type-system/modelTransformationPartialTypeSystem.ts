@@ -3,7 +3,6 @@ import {
     type ExpressionTypirServices,
     type PrimitiveTypes,
     type CustomValueType,
-    type IdentifierExpressionType,
     isCustomValueType,
     isCustomVoidType,
     isCustomLambdaType,
@@ -11,7 +10,6 @@ import {
 } from "@mdeo/language-expression";
 import type { TypirLangiumSpecifics } from "typir-langium";
 import type { ValidationProblemAcceptor, Type } from "typir";
-import type { AstNode } from "langium";
 import {
     LambdaExpression,
     PatternVariable,
@@ -21,9 +19,7 @@ import {
     ElseIfBranch,
     WhileExpressionStatement,
     PatternObjectInstance,
-    PatternApplicationCondition,
     WhereClause,
-    expressionTypes,
     type LambdaExpressionType,
     type PatternPropertyAssignmentType
 } from "../../grammar/modelTransformationTypes.js";
@@ -91,7 +87,6 @@ export class ModelTransformationPartialTypeSystem extends PartialTypeSystem<
         this.registerPatternVariableInferenceRule();
         this.registerPatternVariableValidationRule();
         this.registerPatternVariableReassignmentValidationRule();
-        this.registerIdentifierExpressionValidationRule();
         this.registerPatternPropertyAssignmentValidationRule();
         this.registerControlFlowValidationRules();
         this.registerWhereClauseValidationRule();
@@ -356,80 +351,6 @@ export class ModelTransformationPartialTypeSystem extends PartialTypeSystem<
                 });
             }
         });
-    }
-
-    /**
-     * Registers the validation rule for identifier expressions.
-     * Prevents references to pattern object instances declared inside a condition block.
-     */
-    private registerIdentifierExpressionValidationRule(): void {
-        this.registerValidationRule(expressionTypes.identifierExpressionType, (node, accept) => {
-            this.validateIdentifierExpressionTarget(node, accept);
-        });
-    }
-
-    /**
-     * Validates that identifier expressions do not reach into an application condition block
-     * from the outside.
-     *
-     * A condition block is matched as a separate graph, and its nodes are only bound while
-     * that graph is being matched: expressions of the same block — a where clause or a
-     * property comparison — may read them, expressions of the enclosing match, or of another
-     * block, may not.
-     *
-     * @param node The identifier expression node.
-     * @param accept The validation problem acceptor.
-     */
-    private validateIdentifierExpressionTarget(
-        node: IdentifierExpressionType,
-        accept: ValidationProblemAcceptor<TypirLangiumSpecifics>
-    ): void {
-        const scope = this.typir.ScopeProvider.getScope(node);
-        const entry = scope.getEntry(node.name);
-        if (entry?.languageNode == undefined) {
-            return;
-        }
-
-        if (!this.astReflection.isInstance(entry.languageNode, PatternObjectInstance)) {
-            return;
-        }
-
-        const instance = entry.languageNode;
-        const condition = instance.$container;
-        if (!this.astReflection.isInstance(condition, PatternApplicationCondition)) {
-            return;
-        }
-
-        if (this.findContainingApplicationCondition(node) === condition) {
-            return;
-        }
-
-        const kind = condition.kind ?? "forbid";
-        accept({
-            languageNode: node,
-            message:
-                `Identifier '${node.name}' cannot be used in expressions outside its block: it is ` +
-                `declared inside the '${kind}' block and is not bound by the match.`,
-            severity: "error"
-        });
-    }
-
-    /**
-     * Returns the application condition block a node is declared in, if any.
-     *
-     * @param node The node to inspect.
-     * @returns The enclosing condition block, or `undefined` when the node belongs to the
-     *          match pattern itself.
-     */
-    private findContainingApplicationCondition(node: AstNode): AstNode | undefined {
-        let current: AstNode | undefined = node.$container;
-        while (current != undefined) {
-            if (this.astReflection.isInstance(current, PatternApplicationCondition)) {
-                return current;
-            }
-            current = current.$container;
-        }
-        return undefined;
     }
 
     /**
