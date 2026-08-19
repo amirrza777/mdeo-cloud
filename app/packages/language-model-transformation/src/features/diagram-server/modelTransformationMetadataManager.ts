@@ -63,12 +63,18 @@ export class ModelTransformationMetadataManager extends MetadataManager<ModelTra
         if (
             model.type === ModelTransformationElementType.NODE_START ||
             model.type === ModelTransformationElementType.NODE_END ||
-            model.type === ModelTransformationElementType.NODE_MATCH ||
             model.type === ModelTransformationElementType.NODE_SPLIT ||
             model.type === ModelTransformationElementType.NODE_MERGE ||
             model.type === ModelTransformationElementType.NODE_PATTERN_INSTANCE
         ) {
             return NodeLayoutMetadataUtil.verify(model.meta, 250);
+        }
+
+        // A match node is as large as the pattern it shows, so it has no default size to fall
+        // back to: a preferred size on it means that the user dragged it to that size, and
+        // supplying one here would both widen small matches and make "Reset Layout" a no-op.
+        if (model.type === ModelTransformationElementType.NODE_MATCH) {
+            return NodeLayoutMetadataUtil.verify(model.meta);
         }
 
         if (
