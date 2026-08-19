@@ -43,7 +43,6 @@ import {
     PatternApplicationCondition,
     type PatternApplicationConditionType
 } from "../../grammar/modelTransformationTypes.js";
-import { ModelTransformationApplicationConditionScope } from "./modelTransformationApplicationConditionScope.js";
 import { ModelTransformationLambdaScope } from "./modelTransformationLambdaScope.js";
 
 /**
@@ -395,8 +394,10 @@ export class ModelTransformationTypirScopeProvider extends BaseScopeProvider<
      * scope, so condition constraints — property comparisons and the block's where clauses —
      * can compare against outer nodes and variables.
      *
-     * The scope reports the level of its parent; see
-     * {@link ModelTransformationApplicationConditionScope}.
+     * A block is a scope in its own right, at run time as well: its nodes are matched inside
+     * the block's own sub-traversal, and the execution engine binds their names in a scope of
+     * that level and no other. An identifier resolved here therefore records the block's
+     * level, one level deeper than the pattern's.
      *
      * @param node The application condition node.
      * @param parentScope The parent scope.
@@ -406,7 +407,7 @@ export class ModelTransformationTypirScopeProvider extends BaseScopeProvider<
         node: PatternApplicationConditionType,
         parentScope: BoundScope<TypirLangiumSpecifics> | undefined
     ): Scope<TypirLangiumSpecifics> {
-        return new ModelTransformationApplicationConditionScope(
+        return new DefaultScope<TypirLangiumSpecifics>(
             parentScope,
             (scope) =>
                 (node.elements ?? [])

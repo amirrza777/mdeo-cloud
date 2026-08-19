@@ -1,11 +1,9 @@
 package com.mdeo.modeltransformation.runtime.match
 
 import com.mdeo.modeltransformation.ast.patterns.TypedPattern
-import com.mdeo.modeltransformation.ast.patterns.TypedPatternLinkElement
-import com.mdeo.modeltransformation.ast.patterns.TypedPatternObjectInstanceElement
-import com.mdeo.modeltransformation.ast.patterns.TypedPatternWhereClauseElement
 import com.mdeo.modeltransformation.compiler.SequentialLabelIdGenerator
 import com.mdeo.modeltransformation.compiler.VariableBinding
+import com.mdeo.modeltransformation.compiler.conditionScope
 import com.mdeo.modeltransformation.graph.VertexRef
 import com.mdeo.modeltransformation.runtime.TransformationExecutionContext
 import com.mdeo.modeltransformation.runtime.TransformationEngine
@@ -92,11 +90,9 @@ class MatchExecutor {
      * condition is emitted.
      *
      * The nodes of an application condition are bound inside the condition's own
-     * sub-traversal, never by the match. They still need a binding while the traversal is
-     * built, so that an expression of the block — a where clause or a property comparison —
-     * compiles to `select(label)` on the label the condition chain assigns; the bindings are
-     * dropped again once the traversal is assembled, so they never leak into the statements
-     * that follow.
+     * sub-traversal, never by the match, and their names live in a scope of their own: they
+     * are visible to the constraints of their block and to nothing else. Nothing has to be
+     * unbound afterwards — the scope simply ends with the block it belongs to.
      *
      * @param elements Categorised pattern elements.
      * @param context The current transformation execution context.
@@ -118,12 +114,6 @@ class MatchExecutor {
             context.variableScope.setBinding(varElement.variable.name, VariableBinding.LabelBinding(varLabel))
         }
 
-        val conditionInstanceNames = conditionInstanceNames(elements)
-            .filter { context.variableScope.getVariable(it) == null }
-        for (name in conditionInstanceNames) {
-            context.variableScope.setBinding(name, VariableBinding.InstanceBinding(vertexRef = null))
-        }
-
         val analyzer = MatchAnalyzer(context.variableScope)
         elements.variables.forEach { analyzer.analyzeVariable(it) }
         elements.variableReassignments.forEach { analyzer.analyzeExpression(it.reassignment.value) }
@@ -132,19 +122,7 @@ class MatchExecutor {
             .forEach { analyzer.analyzeObjectInstance(it) }
         (elements.matchableLinks + elements.createLinks + elements.deleteLinks)
             .forEach { analyzer.analyzeLink(it) }
-        elements.conditions
-            .flatMap { it.condition.elements }
-            .filterIsInstance<TypedPatternLinkElement>()
-            .forEach { analyzer.analyzeLink(it) }
-        elements.conditions
-            .flatMap { it.condition.elements }
-            .filterIsInstance<TypedPatternObjectInstanceElement>()
-            .forEach { analyzer.analyzeObjectInstance(it) }
-        elements.conditions
-            .flatMap { it.condition.elements }
-            .filterIsInstance<TypedPatternWhereClauseElement>()
-            .forEach { analyzer.analyzeWhereClause(it) }
-        val referencedInstances = analyzer.getReferencedInstances()
+        val referencedInstances = analyzer.getReferencedInstances() + analyzeConditions(elements, context)
 
         val allMatchable = elements.matchableInstances + elements.deleteInstances
         val matchableNames = allMatchable.map { it.objectInstance.name }.toSet()
@@ -184,8 +162,6 @@ class MatchExecutor {
             expressionSupport, compilationContext, limit
         )
 
-        conditionInstanceNames.forEach { context.variableScope.removeBinding(it) }
-
         val planBoundNames = matchPlan.baseSteps.mapNotNull { step ->
             when (step) {
                 is BaseStep.VertexScan -> step.instanceName
@@ -206,21 +182,33 @@ class MatchExecutor {
     }
 
     /**
-     * Returns the names of the nodes that belong to an application condition alone.
+     * Analyses the application conditions of the pattern and returns everything their
+     * elements read.
      *
-     * An instance declared inside a block carries a class name; an instance without one is a
-     * reference to a node of the enclosing match and is bound by the match itself.
+     * Every block is analysed in a scope of its own — a child of the match's scope holding
+     * the block's own nodes — because that is where the names of a block live: an expression
+     * inside a block records them one level deeper than the match, so an analyser of the match
+     * would not recognise a single reference to them.
      *
      * @param elements The categorised pattern elements.
-     * @return The condition-local node names of all blocks of the pattern.
+     * @param context The current transformation execution context.
+     * @return The names referenced from inside the blocks, condition-local and outer alike.
      */
-    private fun conditionInstanceNames(elements: PatternCategories): List<String> =
-        elements.conditions
-            .flatMap { it.condition.elements }
-            .filterIsInstance<TypedPatternObjectInstanceElement>()
-            .filter { it.objectInstance.className != null }
-            .map { it.objectInstance.name }
-            .distinct()
+    private fun analyzeConditions(
+        elements: PatternCategories,
+        context: TransformationExecutionContext
+    ): Set<String> {
+        val referenced = mutableSetOf<String>()
+        for (condition in elements.conditions) {
+            val block = ApplicationConditionBlock.from(condition)
+            val analyzer = MatchAnalyzer(context.variableScope.conditionScope(block.instanceNames))
+            (block.instances + block.references).forEach { analyzer.analyzeObjectInstance(it) }
+            block.links.forEach { analyzer.analyzeLink(it) }
+            block.whereClauses.forEach { analyzer.analyzeWhereClause(it) }
+            referenced += analyzer.getReferencedInstances()
+        }
+        return referenced
+    }
 
     /**
      * Prints a one-line-per-step summary of [plan] to stdout.

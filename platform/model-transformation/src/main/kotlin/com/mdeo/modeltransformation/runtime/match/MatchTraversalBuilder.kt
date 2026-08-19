@@ -4,6 +4,7 @@ import com.mdeo.modeltransformation.ast.EdgeLabelUtils
 import com.mdeo.modeltransformation.compiler.CompilationContext
 import com.mdeo.modeltransformation.compiler.CompilationResult
 import com.mdeo.modeltransformation.compiler.VariableBinding
+import com.mdeo.modeltransformation.compiler.conditionScope
 import com.mdeo.modeltransformation.compiler.expressions.EqualityCompilerUtil
 import com.mdeo.modeltransformation.runtime.TransformationEngine
 import com.mdeo.modeltransformation.runtime.match.plan.BaseStep
@@ -203,7 +204,7 @@ internal class MatchTraversalBuilder(
         t: GraphTraversal<Vertex, Vertex>,
         step: BaseStep.ApplicationCondition
     ): GraphTraversal<Vertex, Vertex> {
-        val chain = buildConditionChain(step.innerSteps, step.injectiveConstraints)
+        val chain = conditionBuilder(step).buildConditionChain(step.innerSteps, step.injectiveConstraints)
             ?: return t
 
         if (step.anchorName == null || !step.needsSelect) {
@@ -225,6 +226,24 @@ internal class MatchTraversalBuilder(
                 AnonymousTraversal.select<Any, Any>(anchorStepLabel).where(chain)
             ) as GraphTraversal<Vertex, Vertex>
         }
+    }
+
+    /**
+     * Returns the builder that compiles the chain of [step].
+     *
+     * A block is a scope of its own: the names it declares are bound inside its
+     * sub-traversal and are invisible everywhere else, so its constraints are compiled
+     * against a child scope holding exactly those names, bound to the step labels the chain
+     * assigns. A step that declares nothing — the synthetic condition that checks a link —
+     * opens no scope and is compiled by this builder itself.
+     *
+     * @param step The condition whose chain is about to be built.
+     * @return A builder bound to the block's scope, or this builder.
+     */
+    private fun conditionBuilder(step: BaseStep.ApplicationCondition): MatchTraversalBuilder {
+        if (step.localNames.isEmpty()) return this
+        val scope = compilationContext.currentScope.conditionScope(step.localNames)
+        return MatchTraversalBuilder(expressionSupport.withScope(scope), compilationContext.withScope(scope), engine)
     }
 
     /**

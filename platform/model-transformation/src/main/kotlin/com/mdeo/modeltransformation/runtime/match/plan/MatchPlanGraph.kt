@@ -98,6 +98,14 @@ internal class MatchPlanGraph(
     val isCollectionExpression: (TypedExpression) -> Boolean
 ) {
     /**
+     * The analyser for the expressions declared inside an application condition block.
+     *
+     * A block is a scope of its own, so the names it declares are recorded one level deeper
+     * than the match's; its constraints have to be read with that in mind.
+     */
+    val conditionNodeAnalyzer: ExpressionNodeAnalyzer = nodeAnalyzer.nested()
+
+    /**
      * Model-sensitive cost estimates, or `null` when no statistics were supplied.
      *
      * Built on first use: a pattern with a single matchable instance has no ordering choice

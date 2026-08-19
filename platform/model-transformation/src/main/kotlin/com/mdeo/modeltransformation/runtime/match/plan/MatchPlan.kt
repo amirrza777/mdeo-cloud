@@ -131,6 +131,11 @@ internal sealed class BaseStep {
      *
      * Application conditions are sorted by estimated evaluation cost: cheaper conditions
      * (anchored, fewer steps) are placed before more expensive ones (unanchored, many steps).
+     *
+     * [localNames] are the names the block itself declares. They name a scope of their own:
+     * the block's nodes are bound inside its sub-traversal and nowhere else, so the chain is
+     * compiled against a child scope holding exactly these names. It is empty for the
+     * synthetic conditions that check the existence of a link, which declare nothing.
      */
     data class ApplicationCondition(
         val isNegative: Boolean,
@@ -138,7 +143,8 @@ internal sealed class BaseStep {
         val needsSelect: Boolean,
         val innerSteps: List<BaseStep>,
         val injectiveConstraints: Map<String, List<String>> = emptyMap(),
-        val name: String? = null
+        val name: String? = null,
+        val localNames: Set<String> = emptySet()
     ) : BaseStep()
 
     /**

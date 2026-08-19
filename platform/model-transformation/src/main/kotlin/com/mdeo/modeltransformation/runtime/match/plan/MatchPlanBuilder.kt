@@ -1127,7 +1127,8 @@ internal class MatchPlanBuilder(
             return BaseStep.ApplicationCondition(
                 block.isNegative, outerAnchor, needsSelect, innerSteps,
                 buildConditionInjectiveConstraints(block, traversalOrder),
-                block.name
+                block.name,
+                block.instanceNames
             )
         }
 
@@ -1154,7 +1155,7 @@ internal class MatchPlanBuilder(
             instance: TypedPatternObjectInstanceElement
         ): List<BaseStep.InlinePropertyConstraint> = instance.objectInstance.properties.mapNotNull { property ->
             if (property.operator == "=") return@mapNotNull null
-            val referencedNodes = graph.nodeAnalyzer.findReferencedNodes(property.value)
+            val referencedNodes = graph.conditionNodeAnalyzer.findReferencedNodes(property.value)
             val isConstant = referencedNodes.isEmpty() && !graph.isCollectionExpression(property.value)
             BaseStep.InlinePropertyConstraint(
                 instance.objectInstance.name, instance.objectInstance.className, property, isConstant,
@@ -1206,7 +1207,7 @@ internal class MatchPlanBuilder(
             clause: TypedPatternWhereClauseElement,
             block: ApplicationConditionBlock
         ): Set<String> =
-            graph.nodeAnalyzer.findReferencedNodes(clause.whereClause.expression)
+            graph.conditionNodeAnalyzer.findReferencedNodes(clause.whereClause.expression)
                 .filter { it in block.instanceNames }
                 .toSet()
 
@@ -1229,7 +1230,7 @@ internal class MatchPlanBuilder(
                     .filter { property -> property.operator != "=" }
                     .map { property -> property.value }
             return expressions
-                .flatMap { expression -> graph.nodeAnalyzer.findReferencedNodes(expression) }
+                .flatMap { expression -> graph.conditionNodeAnalyzer.findReferencedNodes(expression) }
                 .filter { name -> name !in block.instanceNames }
                 .toSet()
         }

@@ -62,6 +62,12 @@ class ConditionWhereClauseTest {
         const val INT_IDX = 2
         const val BOOL_IDX = 3
         const val NODE_IDX = 4
+
+        /** Scope level of the enclosing match. */
+        private const val MATCH_SCOPE = 1
+
+        /** Scope level of an application condition block, one level inside the match's. */
+        private const val BLOCK_SCOPE = MATCH_SCOPE + 1
     }
 
     private val types: List<ReturnType> = listOf(
@@ -123,22 +129,31 @@ class ConditionWhereClauseTest {
 
     // ── Expression helpers ────────────────────────────────────────────────────
 
-    private fun nodeValue(name: String) = TypedMemberAccessExpression(
-        evalType = STRING_IDX,
-        expression = TypedIdentifierExpression(evalType = NODE_IDX, name = name, scope = 1),
-        member = "value",
-        isNullChaining = false
-    )
+    private fun nodeValue(name: String) = memberAccess(name, "value", STRING_IDX, MATCH_SCOPE)
 
-    private fun nodeSize(name: String) = TypedMemberAccessExpression(
-        evalType = INT_IDX,
-        expression = TypedIdentifierExpression(evalType = NODE_IDX, name = name, scope = 1),
-        member = "size",
-        isNullChaining = false
-    )
+    private fun nodeSize(name: String) = memberAccess(name, "size", INT_IDX, MATCH_SCOPE)
+
+    /**
+     * Reads a property of a node declared by a `forbid` / `require` block.
+     *
+     * A block is a scope of its own, so its names are recorded one level deeper than those
+     * of the match — which is what tells the engine to look them up in the scope the block's
+     * sub-traversal binds them in.
+     */
+    private fun blockValue(name: String) = memberAccess(name, "value", STRING_IDX, BLOCK_SCOPE)
+
+    private fun blockSize(name: String) = memberAccess(name, "size", INT_IDX, BLOCK_SCOPE)
+
+    private fun memberAccess(name: String, member: String, evalType: Int, scope: Int) =
+        TypedMemberAccessExpression(
+            evalType = evalType,
+            expression = TypedIdentifierExpression(evalType = NODE_IDX, name = name, scope = scope),
+            member = member,
+            isNullChaining = false
+        )
 
     private fun variable(name: String) =
-        TypedIdentifierExpression(evalType = INT_IDX, name = name, scope = 1)
+        TypedIdentifierExpression(evalType = INT_IDX, name = name, scope = MATCH_SCOPE)
 
     private fun str(value: String) = TypedStringLiteralExpression(evalType = STRING_IDX, value = value)
 
@@ -201,7 +216,7 @@ class ConditionWhereClauseTest {
                 forbidBlock(
                     conditionNode("b", "Node"),
                     conditionLink("a", "to", "b", "from"),
-                    where(binary(">", nodeSize("b"), int(50))),
+                    where(binary(">", blockSize("b"), int(50))),
                     name = "bigNeighbour"
                 )
             )
@@ -239,7 +254,7 @@ class ConditionWhereClauseTest {
                     conditionNode("c", "Node"),
                     conditionLink("a", "to", "b", "from"),
                     conditionLink("b", "to", "c", "from"),
-                    where(binary("==", nodeValue("b"), nodeValue("c"))),
+                    where(binary("==", blockValue("b"), blockValue("c"))),
                     name = "twoEqualSuccessors"
                 )
             )
@@ -266,8 +281,8 @@ class ConditionWhereClauseTest {
                 forbidBlock(
                     conditionNode("b", "Node"),
                     conditionLink("a", "to", "b", "from"),
-                    where(binary(">", nodeSize("b"), int(50))),
-                    where(binary("==", nodeValue("b"), str("target"))),
+                    where(binary(">", blockSize("b"), int(50))),
+                    where(binary("==", blockValue("b"), str("target"))),
                     name = "bigTarget"
                 )
             )
@@ -296,7 +311,7 @@ class ConditionWhereClauseTest {
                 conditionNode("a", "Node"),
                 forbidBlock(
                     conditionNode("other", "Node"),
-                    where(binary(">", nodeSize("other"), nodeSize("a"))),
+                    where(binary(">", blockSize("other"), nodeSize("a"))),
                     name = "somethingLarger"
                 )
             )
@@ -317,7 +332,7 @@ class ConditionWhereClauseTest {
                 varElement("limit", nodeSize("a")),
                 forbidBlock(
                     conditionNode("other", "Node"),
-                    where(binary(">", nodeSize("other"), variable("limit"))),
+                    where(binary(">", blockSize("other"), variable("limit"))),
                     name = "largerThanLimit"
                 )
             )
@@ -369,8 +384,8 @@ class ConditionWhereClauseTest {
                 conditionNode("a", "Node"),
                 forbidBlock(
                     conditionNode("x", "Node"),
-                    where(binary(">", nodeSize("x"), int(50))),
-                    where(binary("==", nodeValue("x"), str("nothing"))),
+                    where(binary(">", blockSize("x"), int(50))),
+                    where(binary("==", blockValue("x"), str("nothing"))),
                     name = "bigAndNamedNothing"
                 )
             )
@@ -383,12 +398,12 @@ class ConditionWhereClauseTest {
                 conditionNode("a", "Node"),
                 forbidBlock(
                     conditionNode("x", "Node"),
-                    where(binary(">", nodeSize("x"), int(50))),
+                    where(binary(">", blockSize("x"), int(50))),
                     name = "big"
                 ),
                 forbidBlock(
                     conditionNode("y", "Node"),
-                    where(binary("==", nodeValue("y"), str("nothing"))),
+                    where(binary("==", blockValue("y"), str("nothing"))),
                     name = "namedNothing"
                 )
             )
@@ -410,7 +425,7 @@ class ConditionWhereClauseTest {
                 conditionNode("a", "Node"),
                 forbidBlock(
                     conditionNode("other", "Node"),
-                    where(binary(">", nodeSize("other"), int(50))),
+                    where(binary(">", blockSize("other"), int(50))),
                     name = "anotherBigNode"
                 )
             )
@@ -441,7 +456,7 @@ class ConditionWhereClauseTest {
                 requireBlock(
                     conditionNode("b", "Node"),
                     conditionLink("a", "to", "b", "from"),
-                    where(binary(">", nodeSize("b"), int(50))),
+                    where(binary(">", blockSize("b"), int(50))),
                     name = "hasBigNeighbour"
                 )
             )
@@ -461,7 +476,7 @@ class ConditionWhereClauseTest {
                     conditionNode("b", "Node"),
                     conditionLink("a", "to", "b", "from"),
                     conditionNode("c", "Node"),
-                    where(binary("==", nodeSize("b"), nodeSize("c"))),
+                    where(binary("==", blockSize("b"), blockSize("c"))),
                     name = "neighbourMatchesSomeNode"
                 )
             )
@@ -526,7 +541,7 @@ class ConditionWhereClauseTest {
                 conditionNode("a", "Node"),
                 forbidBlock(
                     conditionNode("b", "Node"),
-                    conditionNode("c", "Node", listOf(property("size", "==", nodeSize("b")))),
+                    conditionNode("c", "Node", listOf(property("size", "==", blockSize("b")))),
                     conditionLink("a", "to", "b", "from"),
                     conditionLink("b", "to", "c", "from"),
                     name = "twoSuccessorsOfEqualSize"
@@ -553,7 +568,7 @@ class ConditionWhereClauseTest {
             conditionNode("a", "Node"),
             forbidBlock(
                 conditionNode("hidden", "Node"),
-                where(binary(">", nodeSize("hidden"), int(1000))),
+                where(binary(">", blockSize("hidden"), int(1000))),
                 name = "veryLarge"
             )
         )
