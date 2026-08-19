@@ -209,7 +209,9 @@ export type ApplicationConditionElementType = ASTType<typeof ApplicationConditio
  * distinction that element-level `forbid` modifiers could not express.
  *
  * The optional name follows Henshin's nested-name style; it identifies the block in the
- * graphical syntax (elements are tagged with `«forbid name»`) and in diagnostics.
+ * graphical syntax (elements are tagged with `«forbid name»`) and in diagnostics. A name
+ * is only worth writing when it says something, so the editor leaves the blocks it
+ * creates unnamed and shows them numbered instead.
  */
 export const PatternApplicationCondition = createInterface("PatternApplicationCondition").attrs({
     kind: String,

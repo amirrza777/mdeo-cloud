@@ -12,7 +12,11 @@ import type { ContextItem } from "@mdeo/protocol-common";
 import { InsertNewLabelAction } from "@mdeo/protocol-common";
 import { GMatchNodeCompartments } from "../model/matchNodeCompartments.js";
 import { GWhereClauseLabel } from "../model/whereClauseLabel.js";
-import { getPatternFromMatchNode } from "../modelTransformationPatternUtils.js";
+import {
+    conditionDisplayName,
+    getPatternFromMatchNode,
+    patternConditions
+} from "../modelTransformationPatternUtils.js";
 import {
     PatternApplicationCondition,
     type PatternApplicationConditionType,
@@ -134,7 +138,7 @@ export class AddWhereClauseOperationHandler extends BaseOperationHandler impleme
         if (condition == undefined || matchNode == undefined) {
             return [];
         }
-        const index = this.getConditions(condition.$container as PatternType).indexOf(condition);
+        const index = patternConditions(condition.$container as PatternType, this.reflection).indexOf(condition);
         if (index < 0) {
             return [];
         }
@@ -142,7 +146,7 @@ export class AddWhereClauseOperationHandler extends BaseOperationHandler impleme
         return [
             {
                 id: `add-where-clause-${element.id}`,
-                label: `Add Where Clause to ${this.describeCondition(condition, index)}`,
+                label: `Add Where Clause to ${this.describeCondition(condition)}`,
                 icon: "funnel-plus",
                 sortString: "d",
                 action: this.buildInsertWhereClauseAction(matchNode, index)
@@ -194,27 +198,14 @@ export class AddWhereClauseOperationHandler extends BaseOperationHandler impleme
     }
 
     /**
-     * Returns the application condition blocks of a pattern, in declaration order.
-     *
-     * @param pattern The pattern to inspect
-     * @returns The blocks of the pattern
-     */
-    private getConditions(pattern: PatternType | undefined): PatternApplicationConditionType[] {
-        return ((pattern?.elements ?? []) as AstNode[]).filter((element) =>
-            this.reflection.isInstance(element, PatternApplicationCondition)
-        ) as PatternApplicationConditionType[];
-    }
-
-    /**
      * Builds the label shown for a block in the context rail.
      *
      * @param condition The block
-     * @param index Its index within the pattern, used when the block is unnamed
      * @returns The label text
      */
-    private describeCondition(condition: PatternApplicationConditionType, index: number): string {
+    private describeCondition(condition: PatternApplicationConditionType): string {
         const kind = condition.kind === "require" ? "Require" : "Forbid";
-        return condition.name != undefined ? `${kind} ${condition.name}` : `${kind} #${index + 1}`;
+        return `${kind} ${conditionDisplayName(condition, this.reflection)}`;
     }
 
     /**
@@ -231,7 +222,7 @@ export class AddWhereClauseOperationHandler extends BaseOperationHandler impleme
         if (conditionIndex == undefined) {
             return pattern;
         }
-        const conditions = this.getConditions(pattern);
+        const conditions = patternConditions(pattern, this.reflection);
         return conditionIndex >= 0 && conditionIndex < conditions.length ? conditions[conditionIndex] : undefined;
     }
 

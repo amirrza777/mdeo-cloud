@@ -34,9 +34,7 @@ import {
     type IfMatchStatementType,
     type WhileMatchStatementType,
     type UntilMatchStatementType,
-    type ForMatchStatementType,
-    PatternApplicationCondition,
-    type PatternApplicationConditionType
+    type ForMatchStatementType
 } from "../../../grammar/modelTransformationTypes.js";
 import {
     ModelTransformationElementType,
@@ -510,37 +508,11 @@ export class CreatePatternInstanceOperationHandler
         const openBrace = content[0]!;
         const closeBrace = content[content.length - 1]!;
         const hasContent = (pattern.elements?.length ?? 0) > 0;
-        const name = this.findFreeConditionName(pattern, conditionKind);
         const body = serialized
             .split("\n")
             .map((line) => `    ${line}`)
             .join("\n");
-        return this.insertIntoScope(openBrace, closeBrace, hasContent, `${conditionKind} ${name} {\n${body}\n}`);
-    }
-
-    /**
-     * Picks a condition block name that is not yet used within the pattern.
-     *
-     * @param pattern The pattern the new block belongs to
-     * @param conditionKind The kind of block being created
-     * @returns An unused block name
-     */
-    private findFreeConditionName(pattern: PatternType, conditionKind: "forbid" | "require"): string {
-        const reflection = this.modelState.languageServices.shared.AstReflection;
-        const used = new Set<string>();
-        for (const element of pattern.elements ?? []) {
-            if (reflection.isInstance(element, PatternApplicationCondition)) {
-                const name = (element as PatternApplicationConditionType).name;
-                if (name != undefined) {
-                    used.add(name);
-                }
-            }
-        }
-        let index = 1;
-        while (used.has(`${conditionKind}${index}`)) {
-            index++;
-        }
-        return `${conditionKind}${index}`;
+        return this.insertIntoScope(openBrace, closeBrace, hasContent, `${conditionKind} {\n${body}\n}`);
     }
 
     /**

@@ -129,6 +129,77 @@ export function findContainingPattern(node: AstNode, reflection: AstReflection):
 }
 
 /**
+ * Returns the application condition blocks of a pattern, in declaration order.
+ *
+ * @param pattern The pattern to inspect.
+ * @param reflection The AST reflection instance for type checks.
+ * @returns The blocks of the pattern.
+ */
+export function patternConditions(
+    pattern: { elements?: unknown[] } | undefined,
+    reflection: AstReflection
+): PatternApplicationConditionType[] {
+    return (pattern?.elements ?? []).filter((element) =>
+        reflection.isInstance(element, PatternApplicationCondition)
+    ) as PatternApplicationConditionType[];
+}
+
+/**
+ * Returns the name each application condition block of a pattern is shown under.
+ *
+ * A block does not have to be named: a name is only worth writing when it says
+ * something, so the editor leaves new blocks unnamed. An unnamed block is still shown
+ * as «forbid 2» rather than as a bare «forbid», because the elements of two blocks sit
+ * side by side in the same match node and the reader has nothing else to tell the graph
+ * of one block from the graph of the other.
+ *
+ * The numbers count the unnamed blocks in declaration order and skip every number a
+ * named block of the same pattern already occupies, so that a display name always names
+ * exactly one block: a block named 2 in the source keeps that name for itself.
+ *
+ * @param pattern The pattern whose blocks are named.
+ * @param reflection The AST reflection instance for type checks.
+ * @returns The display name of every block of the pattern.
+ */
+export function conditionDisplayNames(
+    pattern: { elements?: unknown[] } | undefined,
+    reflection: AstReflection
+): Map<PatternApplicationConditionType, string> {
+    const conditions = patternConditions(pattern, reflection);
+    const taken = new Set(conditions.map((condition) => condition.name).filter((name) => name != undefined));
+
+    const names = new Map<PatternApplicationConditionType, string>();
+    let next = 1;
+    for (const condition of conditions) {
+        if (condition.name != undefined) {
+            names.set(condition, condition.name);
+            continue;
+        }
+        while (taken.has(`${next}`)) {
+            next++;
+        }
+        names.set(condition, `${next}`);
+        next++;
+    }
+    return names;
+}
+
+/**
+ * Returns the name a single application condition block is shown under.
+ *
+ * @param condition The block.
+ * @param reflection The AST reflection instance for type checks.
+ * @returns The display name, see {@link conditionDisplayNames}.
+ */
+export function conditionDisplayName(condition: PatternApplicationConditionType, reflection: AstReflection): string {
+    if (condition.name != undefined) {
+        return condition.name;
+    }
+    const names = conditionDisplayNames(condition.$container as { elements?: unknown[] } | undefined, reflection);
+    return names.get(condition) ?? "1";
+}
+
+/**
  * Returns the application condition block a node is declared in.
  *
  * @param node The node to start from.

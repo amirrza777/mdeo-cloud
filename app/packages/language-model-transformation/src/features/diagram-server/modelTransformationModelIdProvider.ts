@@ -36,6 +36,7 @@ import {
     type PatternType
 } from "../../grammar/modelTransformationTypes.js";
 import type { AstReflection } from "@mdeo/language-common";
+import { conditionDisplayName } from "./modelTransformationPatternUtils.js";
 
 const { injectable, inject } = sharedImport("inversify");
 
@@ -327,8 +328,9 @@ export class ModelTransformationModelIdProvider extends BaseModelIdProvider {
     /**
      * Generates a name for a {@link WhereClause} based on its index in the containing node.
      *
-     * A clause of an application condition block is qualified with the block it belongs to,
-     * so that the clauses of two blocks do not compete for the same index-based name.
+     * A clause of an application condition block is qualified with the name the block is
+     * shown under, so that the clauses of two blocks do not compete for the same
+     * index-based name - including when neither block is named in the source.
      *
      * @param node The where clause node
      * @returns The index-based name string, or "where" if the index cannot be determined
@@ -336,7 +338,7 @@ export class ModelTransformationModelIdProvider extends BaseModelIdProvider {
     private getWhereClauseName(node: WhereClauseType): string {
         const container = node.$container;
         const prefix = this.reflection.isInstance(container, PatternApplicationCondition)
-            ? `${BaseModelIdProvider.escapeIdPart((container as PatternApplicationConditionType).name ?? "condition")}_`
+            ? `${BaseModelIdProvider.escapeIdPart(conditionDisplayName(container as PatternApplicationConditionType, this.reflection))}_`
             : "";
         if (container && "$containerProperty" in node) {
             const prop = node.$containerProperty as string;

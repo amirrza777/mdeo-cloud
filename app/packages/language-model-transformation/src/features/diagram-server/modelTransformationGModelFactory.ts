@@ -62,6 +62,7 @@ import { ID } from "@mdeo/language-common";
 import { ModelTransformationIdGenerator } from "./modelTransformationIdGenerator.js";
 import { adaptGeneratedModelTransformationText } from "./generated/generatedModelTransformationAstAdapter.js";
 import {
+    conditionDisplayName,
     flattenPatternElements,
     patternModifierKind,
     type FlattenedPatternElement
@@ -175,6 +176,9 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
      * Returns the stereotype text for an element of an application condition block, or
      * `undefined` for elements of the match pattern itself.
      *
+     * The block is always named in the stereotype, an unnamed one by its number, so that
+     * the elements of two blocks drawn in the same match node stay distinguishable.
+     *
      * @param condition The condition block an element belongs to, if any.
      * @returns The stereotype text (without guillemets), or `undefined`.
      */
@@ -183,7 +187,7 @@ export class ModelTransformationGModelFactory extends BaseGModelFactory<ModelTra
             return undefined;
         }
         const kind = condition.kind ?? "forbid";
-        return condition.name != undefined ? `${kind} ${condition.name}` : kind;
+        return `${kind} ${conditionDisplayName(condition, this.reflection)}`;
     }
 
     /**

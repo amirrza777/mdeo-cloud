@@ -25,6 +25,7 @@ import {
     type PatternPropertyAssignmentType,
     type PatternType
 } from "../../../grammar/modelTransformationTypes.js";
+import { conditionDisplayName, patternConditions } from "../modelTransformationPatternUtils.js";
 
 const { injectable } = sharedImport("inversify");
 const { AstUtils, GrammarUtils } = sharedImport("langium");
@@ -179,14 +180,14 @@ export class MovePatternElementToConditionOperationHandler extends BaseOperation
             });
         }
 
-        const conditions = canEnterCondition ? this.getConditions(pattern) : [];
+        const conditions = canEnterCondition ? patternConditions(pattern, this.reflection) : [];
         for (const [index, condition] of conditions.entries()) {
             if (condition === currentCondition) {
                 continue;
             }
             children.push({
                 id: `move-to-block-${element.id}-${index}`,
-                label: this.describeCondition(condition, index),
+                label: this.describeCondition(condition),
                 icon: condition.kind === "require" ? "square-check" : "square-slash",
                 action: MovePatternElementToConditionOperation.create({
                     elementId: element.id,
@@ -244,27 +245,14 @@ export class MovePatternElementToConditionOperationHandler extends BaseOperation
     }
 
     /**
-     * Returns the application condition blocks of a pattern, in declaration order.
-     *
-     * @param pattern The pattern to inspect
-     * @returns The condition blocks
-     */
-    private getConditions(pattern: PatternType): PatternApplicationConditionType[] {
-        return (pattern.elements ?? []).filter((element) =>
-            this.reflection.isInstance(element, PatternApplicationCondition)
-        ) as PatternApplicationConditionType[];
-    }
-
-    /**
      * Builds the label shown for a destination block.
      *
      * @param condition The condition block
-     * @param index Its index within the pattern, used when the block is unnamed
      * @returns The label for the context item
      */
-    private describeCondition(condition: PatternApplicationConditionType, index: number): string {
+    private describeCondition(condition: PatternApplicationConditionType): string {
         const kind = condition.kind === "require" ? "Require" : "Forbid";
-        return condition.name != undefined ? `${kind} ${condition.name}` : `${kind} #${index + 1}`;
+        return `${kind} ${conditionDisplayName(condition, this.reflection)}`;
     }
 
     /**
@@ -662,7 +650,7 @@ export class MovePatternElementToConditionOperationHandler extends BaseOperation
         }
 
         const index = Number.parseInt(target, 10);
-        const conditions = this.getConditions(pattern);
+        const conditions = patternConditions(pattern, this.reflection);
         if (Number.isNaN(index) || index < 0 || index >= conditions.length) {
             return undefined;
         }
@@ -716,28 +704,7 @@ export class MovePatternElementToConditionOperationHandler extends BaseOperation
             return undefined;
         }
 
-        const name = this.findFreeConditionName(pattern, conditionKind);
         const body = movedText.map((text) => `    ${text}`).join("\n");
-        return this.insertIntoScope(openBrace, closeBrace, true, `${conditionKind} ${name} {\n${body}\n}`);
-    }
-
-    /**
-     * Picks a block name that is not yet used within the pattern.
-     *
-     * @param pattern The pattern the new block belongs to
-     * @param conditionKind The kind of block being created
-     * @returns An unused block name
-     */
-    private findFreeConditionName(pattern: PatternType, conditionKind: "forbid" | "require"): string {
-        const used = new Set(
-            this.getConditions(pattern)
-                .map((condition) => condition.name)
-                .filter((name): name is string => name != undefined)
-        );
-        let index = 1;
-        while (used.has(`${conditionKind}${index}`)) {
-            index++;
-        }
-        return `${conditionKind}${index}`;
+        return this.insertIntoScope(openBrace, closeBrace, true, `${conditionKind} {\n${body}\n}`);
     }
 }
