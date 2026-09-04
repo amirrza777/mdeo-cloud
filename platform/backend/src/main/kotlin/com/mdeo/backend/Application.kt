@@ -7,6 +7,9 @@ import com.mdeo.backend.config.configureStatusPages
 import com.mdeo.backend.database.DatabaseFactory
 import com.mdeo.backend.plugins.*
 import com.mdeo.backend.git.GitRepositoryService
+import com.mdeo.backend.git.ssh.GitSshCommandFactory
+import com.mdeo.backend.git.ssh.GitSshPublickeyAuthenticator
+import com.mdeo.backend.git.ssh.GitSshServer
 import com.mdeo.backend.routes.*
 import com.mdeo.backend.service.*
 import io.ktor.server.application.*
@@ -63,6 +66,7 @@ fun Application.module(appConfig: AppConfig) {
         override val languagePluginRequestService: LanguagePluginRequestService by lazy { LanguagePluginRequestService(this) }
         override val authRateLimiter: AuthRateLimiter by lazy { AuthRateLimiter() }
         override val personalAccessTokenService: PersonalAccessTokenService by lazy { PersonalAccessTokenService(this) }
+        override val sshKeyService: SshKeyService by lazy { SshKeyService(this) }
         val gitRepositoryService: GitRepositoryService by lazy {
             GitRepositoryService(
                 fileService,
@@ -74,13 +78,32 @@ fun Application.module(appConfig: AppConfig) {
     }
     
     services.jwtService.init()
-    
+
     runBlocking {
         services.userService.createDefaultAdmin(appConfig.defaultAdmin.username, appConfig.defaultAdmin.password)
         services.pluginService.initializeDefaultPlugins(appConfig.plugin.defaultPluginUrls)
     }
-    
+
+    // A separate listener from the Ktor/Netty one below, authenticated by
+    // SSH public key instead of HTTP basic credentials, serving the same
+    // two git operations gitRoutes serves over HTTP. start() is
+    // non-blocking (MINA SSHD binds its own I/O thread), so this can run
+    // here rather than needing to be hoisted out to main().
+    val gitSshServer = GitSshServer(
+        port = appConfig.git.sshPort,
+        hostKeyPem = appConfig.git.sshHostKey,
+        publickeyAuthenticator = GitSshPublickeyAuthenticator(services.sshKeyService),
+        commandFactory = GitSshCommandFactory(
+            services.gitRepositoryService,
+            services.projectService,
+            services.webSocketNotificationService,
+            appConfig.git.maxPushPackSizeBytes
+        )
+    )
+    gitSshServer.start()
+
     monitor.subscribe(ApplicationStopped) {
+        gitSshServer.stop()
         DatabaseFactory.close()
     }
     
@@ -154,6 +177,7 @@ fun Application.module(appConfig: AppConfig) {
             userRoutes(services.userService, services.projectService)
             executionRoutes(services.executionService, services.projectService)
             patRoutes(services.personalAccessTokenService)
+            sshKeyRoutes(services.sshKeyService)
         }
     }
 }

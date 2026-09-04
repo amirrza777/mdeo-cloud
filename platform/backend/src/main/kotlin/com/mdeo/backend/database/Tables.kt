@@ -508,3 +508,39 @@ object PersonalAccessTokensTable : Table("personal_access_tokens") {
         index(false, userId)
     }
 }
+
+/**
+ * SSH public keys registered for git-over-SSH authentication. Looked up by
+ * fingerprint against the key an SSH client offers during authentication;
+ * unlike [PersonalAccessTokensTable] the key material itself is not a
+ * secret (only its matching private key, which never leaves the client, is),
+ * so it is stored as given rather than hashed.
+ */
+object SshPublicKeysTable : Table("ssh_public_keys") {
+    val id = uuid("id")
+    val userId = uuid("user_id").references(UsersTable.id, onDelete = ReferenceOption.CASCADE)
+    val name = varchar("name", 255)
+
+    /**
+     * The full authorized_keys-format line, e.g. "ssh-ed25519 AAAA... comment".
+     */
+    val publicKey = text("public_key")
+
+    /**
+     * SHA256 fingerprint of the key's encoded bytes, in the same
+     * "SHA256:base64" form `ssh-keygen -lf` prints. Computed once at
+     * registration so authentication is a lookup rather than a decode and
+     * comparison against every stored key.
+     */
+    val fingerprint = varchar("fingerprint", 255)
+
+    val createdAt = timestamp("created_at")
+    val lastUsedAt = timestamp("last_used_at").nullable()
+
+    override val primaryKey = PrimaryKey(id)
+
+    init {
+        uniqueIndex(fingerprint)
+        index(false, userId)
+    }
+}
