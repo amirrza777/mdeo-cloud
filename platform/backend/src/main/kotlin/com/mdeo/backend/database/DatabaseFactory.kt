@@ -58,7 +58,8 @@ object DatabaseFactory {
                 GitPackFilesTable,
                 GitRefsTable,
                 PersonalAccessTokensTable,
-                SshPublicKeysTable
+                SshPublicKeysTable,
+                PersonalAccessTokenProjectsTable
             )
         }
         

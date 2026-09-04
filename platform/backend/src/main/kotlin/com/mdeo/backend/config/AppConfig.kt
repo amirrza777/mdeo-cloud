@@ -110,7 +110,13 @@ data class AppConfig(
                     maxProjectStorageBytes = System.getenv("GIT_MAX_PROJECT_STORAGE_BYTES")?.toLongOrNull()
                         ?: (2L * 1024 * 1024 * 1024),
                     sshPort = System.getenv("GIT_SSH_PORT")?.toIntOrNull() ?: 2222,
-                    sshHostKey = System.getenv("GIT_SSH_HOST_KEY")
+                    sshHostKey = System.getenv("GIT_SSH_HOST_KEY"),
+                    oauthClientId = System.getenv("GIT_OAUTH_CLIENT_ID") ?: "mdeo-git",
+                    oauthCodeTtlSeconds = System.getenv("GIT_OAUTH_CODE_TTL_SECONDS")?.toLongOrNull() ?: 300,
+                    sshPublicHost = System.getenv("GIT_SSH_PUBLIC_HOST"),
+                    sshPubliclyReachable = System.getenv("GIT_SSH_PUBLICLY_REACHABLE")?.toBooleanStrictOrNull() ?: true,
+                    oauthAuthorizePath = System.getenv("GIT_OAUTH_AUTHORIZE_PATH") ?: "/oauth/authorize",
+                    oauthTokenPath = System.getenv("GIT_OAUTH_TOKEN_PATH") ?: "/api/oauth/token"
                 )
             )
         }
@@ -233,10 +239,31 @@ data class FileDataConfig(
  *   private key file (what `ssh-keygen -t ed25519 -f hostkey` produces) - optional, an ephemeral
  *   key is generated at startup if not provided. A generated key changes on every restart, so
  *   clients see a new host-key warning each time; set this in any environment where that matters.
+ * @property oauthClientId The client id Git Credential Manager is configured with. A public
+ *   client: there is no secret, because a credential helper installed on a developer's machine
+ *   cannot keep one, which is exactly the case PKCE exists for.
+ * @property oauthCodeTtlSeconds How long an issued authorization code stays redeemable. Short by
+ *   design - the code is exchanged by the credential helper within seconds of the browser
+ *   redirect, so anything longer is only a wider window for a leaked code.
+ * @property sshPublicHost The host clients should use in an SSH clone URL, when that is not the
+ *   host the workbench itself is served from. Null means they are the same.
+ * @property sshPubliclyReachable Whether the SSH port is reachable by clients at all. False in a
+ *   deployment that keeps it pod-internal, where advertising an SSH URL would only mislead.
+ * @property oauthAuthorizePath Where the browser-facing authorization screen lives. Both mounted
+ *   and advertised from here, so the setup commands the workbench shows cannot drift from what
+ *   the deployment actually serves.
+ * @property oauthTokenPath Where credential helpers exchange a code for a token, likewise both
+ *   mounted and advertised from this one value.
  */
 data class GitConfig(
     val maxPushPackSizeBytes: Long,
     val maxProjectStorageBytes: Long,
     val sshPort: Int,
-    val sshHostKey: String? = null
+    val sshHostKey: String? = null,
+    val oauthClientId: String,
+    val oauthCodeTtlSeconds: Long,
+    val sshPublicHost: String? = null,
+    val sshPubliclyReachable: Boolean = true,
+    val oauthAuthorizePath: String,
+    val oauthTokenPath: String
 )

@@ -544,3 +544,26 @@ object SshPublicKeysTable : Table("ssh_public_keys") {
         index(false, userId)
     }
 }
+
+/**
+ * The projects a personal access token is restricted to.
+ *
+ * A token with no rows here is unscoped: it can reach every project its
+ * owner can, which is what a token created before scoping existed - and
+ * what a token deliberately created without a scope - must keep doing.
+ * Rows are only ever a *restriction* on top of the owner's own
+ * permissions, never a grant: [com.mdeo.backend.routes.gitRoutes] still
+ * checks the owner's project permission after narrowing by this scope, so
+ * revoking someone's access to a project immediately stops every token
+ * they hold, scoped or not.
+ */
+object PersonalAccessTokenProjectsTable : Table("personal_access_token_projects") {
+    val tokenId = uuid("token_id").references(PersonalAccessTokensTable.id, onDelete = ReferenceOption.CASCADE)
+    val projectId = uuid("project_id").references(ProjectsTable.id, onDelete = ReferenceOption.CASCADE)
+
+    override val primaryKey = PrimaryKey(tokenId, projectId)
+
+    init {
+        index(false, tokenId)
+    }
+}

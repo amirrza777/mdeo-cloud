@@ -19,9 +19,14 @@ class GitSshPublickeyAuthenticator(private val sshKeyService: SshKeyService) : P
     private val logger = LoggerFactory.getLogger(GitSshPublickeyAuthenticator::class.java)
 
     override fun authenticate(username: String, key: PublicKey, session: ServerSession): Boolean {
-        val user = sshKeyService.findUserByPublicKey(key) ?: return false
-        session.setAttribute(AUTHENTICATED_USER_KEY, user)
-        logger.info("SSH public key authentication succeeded for user {}", user.username)
+        val resolved = sshKeyService.findUserByPublicKey(key) ?: return false
+        session.setAttribute(AUTHENTICATED_USER_KEY, resolved.user)
+        session.setAttribute(AUTHENTICATED_KEY_ID, resolved.keyId)
+        // Deliberately not logged as "succeeded", and deliberately not
+        // recorded as use: MINA also calls this for the client's unsigned
+        // probe, which proves nothing about who is on the other end. See
+        // [com.mdeo.backend.service.SshKeyService.recordKeyUsed].
+        logger.debug("SSH public key recognized for user {}, pending signature check", resolved.user.username)
         return true
     }
 }

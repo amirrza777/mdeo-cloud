@@ -7,11 +7,29 @@ import kotlinx.serialization.Serializable
  *
  * @property name A label the user chooses to tell tokens apart later
  * @property expiresAt When the token stops working, or null for no expiry (ISO 8601 timestamp)
+ * @property projectIds The projects the token may reach. An empty list - or
+ *   the property being absent, which is what a client written before
+ *   scoping existed sends - means the token is unscoped and can reach
+ *   every project its owner can.
  */
 @Serializable
 data class CreatePersonalAccessTokenRequest(
     val name: String,
-    val expiresAt: String? = null
+    val expiresAt: String? = null,
+    val projectIds: List<String> = emptyList()
+)
+
+/**
+ * A project a token is scoped to, named so a token list can show what the
+ * token reaches without the client having to resolve ids itself.
+ *
+ * @property id The project's unique identifier
+ * @property name The project's name at the time the token was listed
+ */
+@Serializable
+data class TokenProjectScope(
+    val id: String,
+    val name: String
 )
 
 /**
@@ -24,6 +42,7 @@ data class CreatePersonalAccessTokenRequest(
  * @property token The raw token value, shown once
  * @property createdAt When the token was created (ISO 8601 timestamp)
  * @property expiresAt When the token stops working, or null for no expiry (ISO 8601 timestamp)
+ * @property projects The projects the token is restricted to, empty when unscoped
  */
 @Serializable
 data class PersonalAccessTokenCreated(
@@ -31,7 +50,8 @@ data class PersonalAccessTokenCreated(
     val name: String,
     val token: String,
     val createdAt: String,
-    val expiresAt: String? = null
+    val expiresAt: String? = null,
+    val projects: List<TokenProjectScope> = emptyList()
 )
 
 /**
@@ -43,6 +63,7 @@ data class PersonalAccessTokenCreated(
  * @property createdAt When the token was created (ISO 8601 timestamp)
  * @property lastUsedAt When the token was last used to authenticate, or null if never (ISO 8601 timestamp)
  * @property expiresAt When the token stops working, or null for no expiry (ISO 8601 timestamp)
+ * @property projects The projects the token is restricted to, empty when unscoped
  */
 @Serializable
 data class PersonalAccessTokenInfo(
@@ -51,5 +72,6 @@ data class PersonalAccessTokenInfo(
     val tokenPrefix: String,
     val createdAt: String,
     val lastUsedAt: String? = null,
-    val expiresAt: String? = null
+    val expiresAt: String? = null,
+    val projects: List<TokenProjectScope> = emptyList()
 )

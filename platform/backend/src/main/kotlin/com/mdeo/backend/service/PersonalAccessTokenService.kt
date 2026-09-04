@@ -1,15 +1,21 @@
 package com.mdeo.backend.service
 
+import com.mdeo.backend.database.PersonalAccessTokenProjectsTable
 import com.mdeo.backend.database.PersonalAccessTokensTable
+import com.mdeo.backend.database.ProjectsTable
 import com.mdeo.backend.database.UsersTable
 import com.mdeo.common.model.PersonalAccessTokenCreated
 import com.mdeo.common.model.PersonalAccessTokenInfo
+import com.mdeo.common.model.TokenProjectScope
 import com.mdeo.common.model.User
+import com.mdeo.common.model.UserRoles
 import org.jetbrains.exposed.v1.core.JoinType
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
+import org.jetbrains.exposed.v1.jdbc.batchInsert
 import org.jetbrains.exposed.v1.jdbc.insert
 import org.jetbrains.exposed.v1.jdbc.select
 import org.jetbrains.exposed.v1.jdbc.selectAll
@@ -53,12 +59,46 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
      * @return The created token's metadata plus the raw value, which is
      *   never stored and cannot be recovered after this call returns
      */
-    fun createToken(userId: UUID, name: String, expiresAt: Instant?): PersonalAccessTokenCreated {
+    fun createToken(
+        userId: UUID,
+        name: String,
+        expiresAt: Instant?,
+        projectIds: List<UUID> = emptyList()
+    ): PersonalAccessTokenCreated? {
         val rawToken = generateToken()
         val id = UUID.randomUUID()
         val now = Instant.now()
+        val scope = projectIds.distinct()
 
-        transaction {
+        // A scope may only ever narrow what its owner can already reach, so
+        // a project the owner cannot read is refused outright rather than
+        // silently dropped - a token that quietly covers less than the
+        // caller asked for is worse than one they are told to fix.
+        //
+        // Existence is checked separately from permission because
+        // hasProjectPermission short-circuits to true for a global admin
+        // without ever looking the project up, so for them an id that
+        // matches no project at all would otherwise pass the permission
+        // check and fail later against the foreign key.
+        val isGlobalAdmin = userService.findById(userId)?.roles?.contains(UserRoles.ADMIN) == true
+        if (scope.isNotEmpty()) {
+            val existing = transaction {
+                ProjectsTable
+                    .select(ProjectsTable.id)
+                    .where { ProjectsTable.id inList scope.map { it.toKotlinUuid() } }
+                    .map { it[ProjectsTable.id].toJavaUuid() }
+                    .toSet()
+            }
+            if (scope.any {
+                    it !in existing ||
+                        !projectService.hasProjectPermission(it, userId, isGlobalAdmin, ProjectPermission.READ)
+                }
+            ) {
+                return null
+            }
+        }
+
+        val scopeNames = transaction {
             PersonalAccessTokensTable.insert {
                 it[PersonalAccessTokensTable.id] = id.toKotlinUuid()
                 it[PersonalAccessTokensTable.userId] = userId.toKotlinUuid()
@@ -68,15 +108,30 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
                 it[createdAt] = now
                 it[PersonalAccessTokensTable.expiresAt] = expiresAt
             }
+
+            if (scope.isNotEmpty()) {
+                PersonalAccessTokenProjectsTable.batchInsert(scope) { projectId ->
+                    this[PersonalAccessTokenProjectsTable.tokenId] = id.toKotlinUuid()
+                    this[PersonalAccessTokenProjectsTable.projectId] = projectId.toKotlinUuid()
+                }
+            }
+
+            scopesFor(setOf(id))[id].orEmpty()
         }
 
-        logger.info("Created personal access token '{}' for user {}", name, userId)
+        logger.info(
+            "Created personal access token '{}' for user {}, scoped to {} project(s)",
+            name,
+            userId,
+            if (scope.isEmpty()) "all" else scope.size.toString()
+        )
         return PersonalAccessTokenCreated(
             id = id.toString(),
             name = name,
             token = rawToken,
             createdAt = now.toString(),
-            expiresAt = expiresAt?.toString()
+            expiresAt = expiresAt?.toString(),
+            projects = scopeNames
         )
     }
 
@@ -85,10 +140,36 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
      */
     fun listTokens(userId: UUID): List<PersonalAccessTokenInfo> {
         return transaction {
-            PersonalAccessTokensTable.selectAll()
+            val rows = PersonalAccessTokensTable.selectAll()
                 .where { PersonalAccessTokensTable.userId eq userId.toKotlinUuid() }
-                .map { it.toInfo() }
+                .toList()
+            // Resolved in one query for the whole page rather than per token,
+            // so listing stays a constant number of round trips however many
+            // tokens a user has accumulated.
+            val scopes = scopesFor(rows.map { it[PersonalAccessTokensTable.id].toJavaUuid() }.toSet())
+            rows.map { it.toInfo(scopes[it[PersonalAccessTokensTable.id].toJavaUuid()].orEmpty()) }
         }
+    }
+
+    /**
+     * Resolves the project scope of each of [tokenIds] in a single query.
+     *
+     * @param tokenIds The tokens whose scopes are wanted
+     * @return Scoped projects by token id; a token absent from the map, or
+     *   mapped to an empty list, is unscoped
+     */
+    private fun scopesFor(tokenIds: Set<UUID>): Map<UUID, List<TokenProjectScope>> {
+        if (tokenIds.isEmpty()) {
+            return emptyMap()
+        }
+        val kotlinIds = tokenIds.map { it.toKotlinUuid() }
+        return PersonalAccessTokenProjectsTable
+            .join(ProjectsTable, JoinType.INNER, PersonalAccessTokenProjectsTable.projectId, ProjectsTable.id)
+            .select(PersonalAccessTokenProjectsTable.tokenId, ProjectsTable.id, ProjectsTable.name)
+            .where { PersonalAccessTokenProjectsTable.tokenId inList kotlinIds }
+            .groupBy({ it[PersonalAccessTokenProjectsTable.tokenId].toJavaUuid() }) {
+                TokenProjectScope(it[ProjectsTable.id].toJavaUuid().toString(), it[ProjectsTable.name])
+            }
     }
 
     /**
@@ -116,7 +197,7 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
      * @return The token's owning user, or null if the token is unknown,
      *   expired, or does not start with the recognized prefix at all
      */
-    fun verifyToken(rawToken: String): User? {
+    fun verifyToken(rawToken: String): VerifiedToken? {
         if (!rawToken.startsWith(TOKEN_PREFIX)) {
             return null
         }
@@ -134,14 +215,24 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
                 return@transaction null
             }
 
-            PersonalAccessTokensTable.update({ PersonalAccessTokensTable.id eq row[PersonalAccessTokensTable.id] }) {
+            val tokenId = row[PersonalAccessTokensTable.id]
+            PersonalAccessTokensTable.update({ PersonalAccessTokensTable.id eq tokenId }) {
                 it[lastUsedAt] = Instant.now()
             }
 
-            User(
-                id = row[UsersTable.id].toJavaUuid().toString(),
-                username = row[UsersTable.username],
-                roles = parseRoles(row[UsersTable.roles]).toList()
+            val scope = PersonalAccessTokenProjectsTable
+                .select(PersonalAccessTokenProjectsTable.projectId)
+                .where { PersonalAccessTokenProjectsTable.tokenId eq tokenId }
+                .map { it[PersonalAccessTokenProjectsTable.projectId].toJavaUuid() }
+                .toSet()
+
+            VerifiedToken(
+                user = User(
+                    id = row[UsersTable.id].toJavaUuid().toString(),
+                    username = row[UsersTable.username],
+                    roles = parseRoles(row[UsersTable.roles]).toList()
+                ),
+                scopedProjectIds = scope
             )
         }
     }
@@ -157,14 +248,15 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
         return digest.joinToString("") { "%02x".format(it) }
     }
 
-    private fun ResultRow.toInfo(): PersonalAccessTokenInfo {
+    private fun ResultRow.toInfo(projects: List<TokenProjectScope>): PersonalAccessTokenInfo {
         return PersonalAccessTokenInfo(
             id = this[PersonalAccessTokensTable.id].toJavaUuid().toString(),
             name = this[PersonalAccessTokensTable.name],
             tokenPrefix = this[PersonalAccessTokensTable.tokenPrefix],
             createdAt = this[PersonalAccessTokensTable.createdAt].toString(),
             lastUsedAt = this[PersonalAccessTokensTable.lastUsedAt]?.toString(),
-            expiresAt = this[PersonalAccessTokensTable.expiresAt]?.toString()
+            expiresAt = this[PersonalAccessTokensTable.expiresAt]?.toString(),
+            projects = projects
         )
     }
 
@@ -175,4 +267,26 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
             .filter { it.isNotBlank() }
             .toSet()
     }
+}
+
+/**
+ * A personal access token that has been checked and found valid, together
+ * with what it is allowed to reach.
+ *
+ * @property user The token's owner, who the caller is treated as
+ * @property scopedProjectIds The projects the token is restricted to. Empty
+ *   means unscoped - every project the owner can reach - which is what
+ *   tokens created before scoping existed, and tokens deliberately created
+ *   without a scope, both are.
+ */
+data class VerifiedToken(
+    val user: User,
+    val scopedProjectIds: Set<UUID>
+) {
+    /**
+     * Whether this token may be used against [projectId]. Only ever a
+     * restriction: the caller must still separately hold the project
+     * permission the operation needs.
+     */
+    fun allows(projectId: UUID): Boolean = scopedProjectIds.isEmpty() || projectId in scopedProjectIds
 }

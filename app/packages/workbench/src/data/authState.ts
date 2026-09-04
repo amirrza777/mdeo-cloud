@@ -128,9 +128,11 @@ export class AuthState {
      *
      * @param name A label to tell this token apart from others later
      * @param expiresAt When the token stops working, or undefined for no expiry
+     * @param projectIds Projects to restrict the token to; empty means every
+     *   project the user can reach
      */
-    async createToken(name: string, expiresAt?: string) {
-        return this.backendApi.auth.createToken(name, expiresAt);
+    async createToken(name: string, expiresAt?: string, projectIds: string[] = []) {
+        return this.backendApi.auth.createToken(name, expiresAt, projectIds);
     }
 
     /**

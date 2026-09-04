@@ -51,7 +51,21 @@ fun Route.patRoutes(personalAccessTokenService: PersonalAccessTokenService) {
                 return@post
             }
 
-            val created = personalAccessTokenService.createToken(userId, request.name, expiresAt)
+            val projectIds = try {
+                request.projectIds.map { UUID.fromString(it) }
+            } catch (_: IllegalArgumentException) {
+                call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid project ID"))
+                return@post
+            }
+
+            val created = personalAccessTokenService.createToken(userId, request.name, expiresAt, projectIds)
+            if (created == null) {
+                // The scope named a project the caller cannot read. Refused
+                // rather than narrowed, so nobody ends up holding a token
+                // that silently covers less than they asked for.
+                call.respond(HttpStatusCode.Forbidden, mapOf("error" to "Cannot scope a token to a project you cannot access"))
+                return@post
+            }
             call.respond(created)
         }
 

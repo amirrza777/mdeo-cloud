@@ -118,7 +118,7 @@ class SshKeyService(services: InjectedServices) : BaseService(), InjectedService
      * server's [org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator]
      * to decide whether an offered key is recognized.
      */
-    fun findUserByPublicKey(key: PublicKey): User? {
+    fun findUserByPublicKey(key: PublicKey): ResolvedSshKey? {
         val fingerprint = KeyUtils.getFingerPrint(key)
         return transaction {
             val row = SshPublicKeysTable
@@ -127,15 +127,38 @@ class SshKeyService(services: InjectedServices) : BaseService(), InjectedService
                 .where { SshPublicKeysTable.fingerprint eq fingerprint }
                 .firstOrNull() ?: return@transaction null
 
-            SshPublicKeysTable.update({ SshPublicKeysTable.id eq row[SshPublicKeysTable.id] }) {
+            ResolvedSshKey(
+                keyId = row[SshPublicKeysTable.id].toJavaUuid(),
+                user = User(
+                    id = row[UsersTable.id].toJavaUuid().toString(),
+                    username = row[UsersTable.username],
+                    roles = parseRoles(row[UsersTable.roles]).toList()
+                )
+            )
+        }
+    }
+
+    /**
+     * Records that a key was actually used, which is deliberately *not*
+     * done when the key is merely resolved.
+     *
+     * MINA calls its [org.apache.sshd.server.auth.pubkey.PublickeyAuthenticator]
+     * for the client's unsigned "would you accept this key?" probe as well
+     * as for the signed attempt that follows, and the probe carries no
+     * proof the caller holds the private half. Since a public key is, by
+     * definition, public, bumping the timestamp there would let anyone
+     * holding someone else's public key forge their "last used" - and
+     * would mark a key used on attempts that went on to fail. Recording it
+     * once the session has reached the point of running a command means
+     * the signature has necessarily been verified first.
+     *
+     * @param keyId The key that authenticated the session
+     */
+    fun recordKeyUsed(keyId: UUID) {
+        transaction {
+            SshPublicKeysTable.update({ SshPublicKeysTable.id eq keyId.toKotlinUuid() }) {
                 it[lastUsedAt] = Instant.now()
             }
-
-            User(
-                id = row[UsersTable.id].toJavaUuid().toString(),
-                username = row[UsersTable.username],
-                roles = parseRoles(row[UsersTable.roles]).toList()
-            )
         }
     }
 
@@ -157,3 +180,16 @@ class SshKeyService(services: InjectedServices) : BaseService(), InjectedService
             .toSet()
     }
 }
+
+/**
+ * A registered SSH key matched to an offered public key, before any
+ * signature over it has been verified.
+ *
+ * @property keyId The stored key's identifier, used to record genuine use
+ *   once authentication has actually completed
+ * @property user The key's owner
+ */
+data class ResolvedSshKey(
+    val keyId: UUID,
+    val user: User
+)

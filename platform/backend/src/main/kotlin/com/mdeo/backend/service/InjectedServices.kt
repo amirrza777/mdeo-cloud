@@ -91,4 +91,10 @@ interface InjectedServices {
      * keys used to authenticate git-over-SSH.
      */
     val sshKeyService: SshKeyService
+
+    /**
+     * Issues and redeems the short-lived authorization codes a git
+     * credential helper trades a browser sign-in for.
+     */
+    val oAuthCodeService: OAuthCodeService
 }

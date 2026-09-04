@@ -355,10 +355,20 @@ private suspend fun ApplicationCall.authorizeGit(
     // reaches (and never has to pay the cost of) a token lookup, and a
     // token never falls through to a bcrypt comparison it could not
     // possibly match.
-    val user = personalAccessTokenService.verifyToken(password) ?: userService.verifyPassword(username, password)
+    val verifiedToken = personalAccessTokenService.verifyToken(password)
+    val user = verifiedToken?.user ?: userService.verifyPassword(username, password)
     if (user == null) {
         response.header(HttpHeaders.WWWAuthenticate, "Basic realm=\"MDEO Cloud\"")
         respond(HttpStatusCode.Unauthorized, "Invalid credentials")
+        return null
+    }
+
+    // A token scoped to other projects is treated exactly like a caller
+    // with no access to this one: the same answer as an unknown project,
+    // so a narrow token cannot be used to discover which project ids exist
+    // any more than a wrong password can.
+    if (verifiedToken != null && !verifiedToken.allows(projectId)) {
+        respond(HttpStatusCode.NotFound, "Unknown repository")
         return null
     }
 

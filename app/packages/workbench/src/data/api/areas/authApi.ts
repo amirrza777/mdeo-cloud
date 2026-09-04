@@ -1,3 +1,4 @@
+import type { GitOAuthAuthorizationRequest } from "../../gitOAuthRequest";
 import { ApiResult, CommonErrorCode, type CommonError } from "../apiResult";
 import type { BackendApiCore } from "../backendApi";
 
@@ -14,6 +15,11 @@ export interface User {
 /**
  * A personal access token's metadata, without the raw value.
  */
+export interface TokenProjectScope {
+    id: string;
+    name: string;
+}
+
 export interface PersonalAccessTokenInfo {
     id: string;
     name: string;
@@ -21,6 +27,8 @@ export interface PersonalAccessTokenInfo {
     createdAt: string;
     lastUsedAt: string | null;
     expiresAt: string | null;
+    /** Projects the token is restricted to; empty means every project its owner can reach. */
+    projects: TokenProjectScope[];
 }
 
 /**
@@ -33,6 +41,8 @@ export interface PersonalAccessTokenCreated {
     token: string;
     createdAt: string;
     expiresAt: string | null;
+    /** Projects the token is restricted to; empty means every project its owner can reach. */
+    projects: TokenProjectScope[];
 }
 
 /**
@@ -44,6 +54,20 @@ export interface SshPublicKeyInfo {
     fingerprint: string;
     createdAt: string;
     lastUsedAt: string | null;
+}
+
+/**
+ * Where to send the browser once a git authorization request is answered.
+ */
+export interface GitOAuthDecision {
+    redirectTo: string;
+}
+
+/**
+ * What the git authorization screen needs to describe the request.
+ */
+export interface GitOAuthRequestInfo {
+    scope?: string;
 }
 
 /**
@@ -193,18 +217,23 @@ export class AuthApi {
      */
     async createToken(
         name: string,
-        expiresAt?: string
+        expiresAt?: string,
+        projectIds: string[] = []
     ): Promise<ApiResult<PersonalAccessTokenCreated, CommonError>> {
         try {
             const response = await fetch(`${this.core.baseUrl}/tokens`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 credentials: "include",
-                body: JSON.stringify({ name, expiresAt })
+                body: JSON.stringify({ name, expiresAt, projectIds })
             });
 
             if (!response.ok) {
-                return ApiResult.commonFailure(CommonErrorCode.Unavailable, "Failed to create token");
+                const message =
+                    response.status === 403
+                        ? "You cannot scope a token to a project you do not have access to."
+                        : "Failed to create token";
+                return ApiResult.commonFailure(CommonErrorCode.Unavailable, message);
             }
 
             const data = await response.json();
@@ -336,6 +365,60 @@ export class AuthApi {
             }
 
             return ApiResult.success(undefined);
+        } catch (error) {
+            return ApiResult.commonFailure(CommonErrorCode.Unavailable, String(error));
+        }
+    }
+
+    /**
+     * Validates a git credential helper's authorization request before the
+     * screen offers to approve it.
+     *
+     * @param request The request as it arrived on the URL
+     */
+    async getGitOAuthRequestInfo(
+        request: GitOAuthAuthorizationRequest
+    ): Promise<ApiResult<GitOAuthRequestInfo, CommonError>> {
+        return this.postGitOAuth<GitOAuthRequestInfo>(`${this.core.baseUrl}/oauth/request-info`, request);
+    }
+
+    /**
+     * Approves or declines a git authorization request.
+     *
+     * @param request The request as it arrived on the URL
+     * @param approve Whether the user allowed it
+     */
+    async decideGitOAuth(
+        request: GitOAuthAuthorizationRequest,
+        approve: boolean
+    ): Promise<ApiResult<GitOAuthDecision, CommonError>> {
+        return this.postGitOAuth<GitOAuthDecision>(`${this.core.baseUrl}/oauth/authorize?approve=${approve}`, request);
+    }
+
+    /**
+     * Posts an authorization request, surfacing the `error_description` the
+     * OAuth endpoints report rather than a generic failure - it is the only
+     * thing that can tell a user their credential helper is misconfigured.
+     */
+    private async postGitOAuth<T>(
+        url: string,
+        request: GitOAuthAuthorizationRequest
+    ): Promise<ApiResult<T, CommonError>> {
+        try {
+            const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "include",
+                body: JSON.stringify(request)
+            });
+            const data = await response.json().catch(() => undefined);
+            if (!response.ok) {
+                return ApiResult.commonFailure(
+                    CommonErrorCode.Unavailable,
+                    data?.error_description ?? "Could not authorize git access"
+                );
+            }
+            return ApiResult.success(data);
         } catch (error) {
             return ApiResult.commonFailure(CommonErrorCode.Unavailable, String(error));
         }

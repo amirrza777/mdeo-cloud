@@ -67,6 +67,7 @@ fun Application.module(appConfig: AppConfig) {
         override val authRateLimiter: AuthRateLimiter by lazy { AuthRateLimiter() }
         override val personalAccessTokenService: PersonalAccessTokenService by lazy { PersonalAccessTokenService(this) }
         override val sshKeyService: SshKeyService by lazy { SshKeyService(this) }
+        override val oAuthCodeService: OAuthCodeService by lazy { OAuthCodeService() }
         val gitRepositoryService: GitRepositoryService by lazy {
             GitRepositoryService(
                 fileService,
@@ -96,6 +97,7 @@ fun Application.module(appConfig: AppConfig) {
         commandFactory = GitSshCommandFactory(
             services.gitRepositoryService,
             services.projectService,
+            services.sshKeyService,
             services.webSocketNotificationService,
             appConfig.git.maxPushPackSizeBytes
         )
@@ -140,7 +142,25 @@ fun Application.module(appConfig: AppConfig) {
     
     routing {
         healthRoutes()
+        gitConfigRoutes(
+            appConfig.git.sshPort,
+            appConfig.git.sshPublicHost,
+            appConfig.git.sshPubliclyReachable,
+            appConfig.git.oauthAuthorizePath,
+            appConfig.git.oauthTokenPath
+        )
         authRoutes(services.userService, services.jwtService, services.authRateLimiter)
+        // Unauthenticated by design: the browser GCM opens has no session
+        // yet, and signing in is the whole point of the page.
+        oauthRoutes(
+            services.personalAccessTokenService,
+            services.oAuthCodeService,
+            appConfig.git.oauthClientId,
+            java.time.Duration.ofSeconds(appConfig.git.oauthCodeTtlSeconds),
+            appConfig.session.maxAbsoluteSeconds,
+            appConfig.git.oauthTokenPath,
+            appConfig.git.oauthAuthorizePath
+        )
 
         // Outside the session and JWT blocks on purpose: git clients cannot
         // present either, so these routes authenticate the HTTP basic

@@ -158,3 +158,28 @@ variable "optimizer_transformation_timeout_ms" {
   description = "Default per-transformation timeout in milliseconds for optimizer-execution pods"
   default     = 1000
 }
+
+variable "git_oauth_authorize_path" {
+  type        = string
+  description = "Path of the browser-facing git authorization screen. Both mounted and advertised in the setup commands the workbench shows, so the two cannot drift apart."
+  default     = "/oauth/authorize"
+}
+
+variable "git_oauth_token_path" {
+  type        = string
+  description = "Path where git credential helpers exchange an authorization code for an access token."
+  default     = "/api/oauth/token"
+}
+
+variable "git_ssh_public_host" {
+  type        = string
+  description = "Host clients should use in an SSH clone URL, when that is not the host the workbench is served from. Null means they are the same."
+  nullable    = true
+  default     = null
+}
+
+variable "git_ssh_publicly_reachable" {
+  type        = bool
+  description = "Whether the git SSH port is reachable by clients. The in-cluster service port is pod-to-pod only by default, so this stays false until SSH is actually exposed - otherwise the workbench would advertise an SSH clone URL that nobody can reach."
+  default     = false
+}

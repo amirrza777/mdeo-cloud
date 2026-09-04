@@ -216,6 +216,31 @@ resource "kubernetes_deployment_v1" "backend" {
             }
           }
 
+          # Git access
+          env {
+            name  = "GIT_SSH_PORT"
+            value = "2222"
+          }
+          env {
+            name  = "GIT_OAUTH_AUTHORIZE_PATH"
+            value = var.git_oauth_authorize_path
+          }
+          env {
+            name  = "GIT_OAUTH_TOKEN_PATH"
+            value = var.git_oauth_token_path
+          }
+          env {
+            name  = "GIT_SSH_PUBLICLY_REACHABLE"
+            value = tostring(var.git_ssh_publicly_reachable)
+          }
+          dynamic "env" {
+            for_each = var.git_ssh_public_host == null ? [] : [var.git_ssh_public_host]
+            content {
+              name  = "GIT_SSH_PUBLIC_HOST"
+              value = env.value
+            }
+          }
+
           # Cookie / CORS
           env {
             name  = "COOKIE_SECURE"

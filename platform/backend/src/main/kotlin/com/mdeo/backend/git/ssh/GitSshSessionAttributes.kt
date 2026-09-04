@@ -10,3 +10,11 @@ import org.apache.sshd.common.AttributeRepository
  * same session.
  */
 internal val AUTHENTICATED_USER_KEY = AttributeRepository.AttributeKey<User>()
+
+/**
+ * Session attribute holding the id of the key that authenticated the
+ * session, so [GitSshCommandFactory] can record genuine use once a command
+ * actually runs - which is necessarily after MINA has verified the
+ * client's signature. See [com.mdeo.backend.service.SshKeyService.recordKeyUsed].
+ */
+internal val AUTHENTICATED_KEY_ID = AttributeRepository.AttributeKey<java.util.UUID>()

@@ -4,6 +4,7 @@ import com.mdeo.backend.git.GitRepositoryService
 import com.mdeo.backend.git.parseProjectIdFromGitPath
 import com.mdeo.backend.service.ProjectPermission
 import com.mdeo.backend.service.ProjectService
+import com.mdeo.backend.service.SshKeyService
 import com.mdeo.backend.service.WebSocketNotificationService
 import com.mdeo.common.model.UserRoles
 import org.apache.sshd.server.Environment
@@ -24,12 +25,14 @@ import java.util.UUID
  *
  * @param gitRepositoryService Opens and publishes project repositories
  * @param projectService Used to check the caller may access the project
+ * @param sshKeyService Used to record that the authenticating key was genuinely used
  * @param webSocketNotificationService Notifies open workbench tabs after a push changes files
  * @param maxPushPackSizeBytes Largest pack a push may send; see [com.mdeo.backend.config.GitConfig]
  */
 class GitSshCommandFactory(
     private val gitRepositoryService: GitRepositoryService,
     private val projectService: ProjectService,
+    private val sshKeyService: SshKeyService,
     private val webSocketNotificationService: WebSocketNotificationService,
     private val maxPushPackSizeBytes: Long
 ) : CommandFactory {
@@ -60,6 +63,11 @@ class GitSshCommandFactory(
         ) {
             return RejectingCommand("unknown repository")
         }
+
+        // Reaching here means MINA completed public key authentication, so
+        // the client has proven it holds the private half - the first point
+        // at which recording the key as used is actually truthful.
+        channel.getSession().getAttribute(AUTHENTICATED_KEY_ID)?.let { sshKeyService.recordKeyUsed(it) }
 
         val isProjectAdmin = projectService.hasProjectPermission(projectId, userId, isGlobalAdmin, ProjectPermission.ADMIN)
         return SshGitPackCommand(
