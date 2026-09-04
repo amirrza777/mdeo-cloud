@@ -107,6 +107,7 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
                 it[tokenPrefix] = rawToken.take(TOKEN_PREFIX.length + 4)
                 it[createdAt] = now
                 it[PersonalAccessTokensTable.expiresAt] = expiresAt
+                it[PersonalAccessTokensTable.scoped] = scope.isNotEmpty()
             }
 
             if (scope.isNotEmpty()) {
@@ -206,7 +207,14 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
         return transaction {
             val row = PersonalAccessTokensTable
                 .join(UsersTable, JoinType.INNER, PersonalAccessTokensTable.userId, UsersTable.id)
-                .select(UsersTable.id, UsersTable.username, UsersTable.roles, PersonalAccessTokensTable.id, PersonalAccessTokensTable.expiresAt)
+                .select(
+                    UsersTable.id,
+                    UsersTable.username,
+                    UsersTable.roles,
+                    PersonalAccessTokensTable.id,
+                    PersonalAccessTokensTable.expiresAt,
+                    PersonalAccessTokensTable.scoped
+                )
                 .where { PersonalAccessTokensTable.tokenHash eq hash }
                 .firstOrNull() ?: return@transaction null
 
@@ -232,6 +240,7 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
                     username = row[UsersTable.username],
                     roles = parseRoles(row[UsersTable.roles]).toList()
                 ),
+                scoped = row[PersonalAccessTokensTable.scoped],
                 scopedProjectIds = scope
             )
         }
@@ -256,6 +265,7 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
             createdAt = this[PersonalAccessTokensTable.createdAt].toString(),
             lastUsedAt = this[PersonalAccessTokensTable.lastUsedAt]?.toString(),
             expiresAt = this[PersonalAccessTokensTable.expiresAt]?.toString(),
+            scoped = this[PersonalAccessTokensTable.scoped],
             projects = projects
         )
     }
@@ -274,19 +284,26 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
  * with what it is allowed to reach.
  *
  * @property user The token's owner, who the caller is treated as
- * @property scopedProjectIds The projects the token is restricted to. Empty
- *   means unscoped - every project the owner can reach - which is what
- *   tokens created before scoping existed, and tokens deliberately created
- *   without a scope, both are.
+ * @property scoped Whether the token was created restricted to particular
+ *   projects at all. False means it reaches every project the owner can,
+ *   which is what a token deliberately created without a scope is.
+ * @property scopedProjectIds The projects the token is restricted to, for a
+ *   token that is [scoped]. This can be empty even so, once every project it
+ *   named has been deleted, in which case the token reaches nothing.
  */
 data class VerifiedToken(
     val user: User,
+    val scoped: Boolean,
     val scopedProjectIds: Set<UUID>
 ) {
     /**
      * Whether this token may be used against [projectId]. Only ever a
      * restriction: the caller must still separately hold the project
      * permission the operation needs.
+     *
+     * Keyed on [scoped] rather than on whether [scopedProjectIds] is empty,
+     * so deleting the last project a token was narrowed to leaves it
+     * reaching nothing instead of quietly reaching everything.
      */
-    fun allows(projectId: UUID): Boolean = scopedProjectIds.isEmpty() || projectId in scopedProjectIds
+    fun allows(projectId: UUID): Boolean = !scoped || projectId in scopedProjectIds
 }

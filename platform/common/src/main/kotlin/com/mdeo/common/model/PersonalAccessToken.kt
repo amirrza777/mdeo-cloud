@@ -63,7 +63,10 @@ data class PersonalAccessTokenCreated(
  * @property createdAt When the token was created (ISO 8601 timestamp)
  * @property lastUsedAt When the token was last used to authenticate, or null if never (ISO 8601 timestamp)
  * @property expiresAt When the token stops working, or null for no expiry (ISO 8601 timestamp)
- * @property projects The projects the token is restricted to, empty when unscoped
+ * @property scoped Whether the token was created restricted to particular projects at all. A
+ *   scoped token can still list no projects, once every project it named has been deleted, and
+ *   then reaches nothing - which is the opposite of what an unscoped token does.
+ * @property projects The projects the token is restricted to; only meaningful when [scoped]
  */
 @Serializable
 data class PersonalAccessTokenInfo(
@@ -73,5 +76,6 @@ data class PersonalAccessTokenInfo(
     val createdAt: String,
     val lastUsedAt: String? = null,
     val expiresAt: String? = null,
+    val scoped: Boolean = false,
     val projects: List<TokenProjectScope> = emptyList()
 )

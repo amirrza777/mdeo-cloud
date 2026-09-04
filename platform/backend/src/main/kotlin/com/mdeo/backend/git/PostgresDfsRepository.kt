@@ -22,6 +22,25 @@ class PostgresDfsRepository(
     private val objectDatabase = PostgresDfsObjDatabase(projectId, this)
     private val refDatabase = PostgresDfsRefDatabase(projectId, this)
 
+    /**
+     * The project's file versions, by path, as of the moment
+     * [GitRepositoryService.openRepository] last published the branch on this
+     * instance.
+     *
+     * A client computes its push against exactly this state, so
+     * [GitRepositoryService.applyCommitToProject] checks the project still
+     * matches it before applying anything. Recorded here, on the per-request
+     * repository, rather than passed through the routes, because the two
+     * points that need it are the two ends of one request's work with this
+     * object.
+     *
+     * The workbench's own writes go through [com.mdeo.backend.service.FileService]
+     * without taking the per-project git lock, so an edit made in a browser
+     * between publication and application is the one thing that lock cannot
+     * rule out; without this check the push would silently revert it.
+     */
+    var publishedFileVersions: Map<String, Int> = emptyMap()
+
     override fun getObjectDatabase(): PostgresDfsObjDatabase = objectDatabase
 
     override fun getRefDatabase(): RefDatabase = refDatabase

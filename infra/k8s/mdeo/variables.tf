@@ -183,3 +183,21 @@ variable "git_ssh_publicly_reachable" {
   description = "Whether the git SSH port is reachable by clients. The in-cluster service port is pod-to-pod only by default, so this stays false until SSH is actually exposed - otherwise the workbench would advertise an SSH clone URL that nobody can reach."
   default     = false
 }
+
+variable "trusted_proxy_hops" {
+  type        = number
+  description = <<-EOT
+    How many reverse proxies sit between clients and the backend, used to resolve a request's real
+    client address out of X-Forwarded-For for the authentication rate limiter (see
+    platform/backend/.../plugins/ClientAddress.kt). Zero, the default, trusts the header not at all
+    and keys on the direct peer, which groups every user of a proxied deployment into one bucket but
+    can never be spoofed.
+
+    Setting this wrong in the *high* direction is what lets a caller forge its own address, so raise
+    it only once the hop count is known for certain. In this deployment it is not uniform: /api goes
+    Gateway -> backend, while /git goes Gateway -> workbench nginx -> backend, and whether the
+    Gateway appends to X-Forwarded-For at all depends on the controller in use. Set 1 only if the
+    Gateway is known to append it.
+  EOT
+  default     = 0
+}

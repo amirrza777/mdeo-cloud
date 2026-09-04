@@ -6,6 +6,11 @@ import java.util.concurrent.TimeUnit
  * Main application configuration containing all configuration sections.
  *
  * @property serverPort The port number on which the server will listen
+ * @property trustedProxyHops How many reverse proxies sit between clients and this backend, used
+ *   to resolve a request's real client address from `X-Forwarded-For`. Zero (the default) trusts
+ *   the header not at all and uses the direct peer, which is correct whenever the backend can be
+ *   reached without going through a proxy; every deployment that fronts it with nginx sets this
+ *   to 1. See [com.mdeo.backend.plugins.clientAddress].
  * @property database Database connection configuration
  * @property session Session management configuration
  * @property cors Cross-Origin Resource Sharing configuration
@@ -15,6 +20,7 @@ import java.util.concurrent.TimeUnit
  */
 data class AppConfig(
     val serverPort: Int,
+    val trustedProxyHops: Int,
     val database: DatabaseConfig,
     val session: SessionConfig,
     val cors: CorsConfig,
@@ -37,6 +43,7 @@ data class AppConfig(
             
             return AppConfig(
                 serverPort = System.getenv("SERVER_PORT")?.toIntOrNull() ?: 8080,
+                trustedProxyHops = System.getenv("TRUSTED_PROXY_HOPS")?.toIntOrNull() ?: 0,
                 database = DatabaseConfig(
                     url = System.getenv("DATABASE_URL") 
                         ?: "jdbc:postgresql://localhost:5432/mdeo",

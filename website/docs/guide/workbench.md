@@ -188,10 +188,14 @@ not count as use.
 
 ### What a clone contains
 
-A clone contains every project file, plus a `.mdeo` file listing the project's enabled plugins, so a
-fresh clone opened as a new project comes up with the same languages available. Changing that file
-over a push requires admin permission on the project, the same bar changing plugins from the
-workbench itself is held to, not merely write access.
+A clone contains every project file, plus a single `project.mdeo` file at the repository root
+listing the project's enabled plugins, so a fresh clone opened as a new project comes up with the
+same languages available. Changing that file over a push requires admin permission on the project,
+the same bar changing plugins from the workbench itself is held to, not merely write access.
+
+The `.mdeo` extension is reserved for MDEO itself. No project file may use it, in a push or in the
+workbench, and no plugin may register a language claiming it - which is what lets MDEO generate the
+file above without it ever colliding with something you created.
 
 Diagram layout is not included: it is purely visual and changes on nearly every interaction with a
 diagram, so a project opened for the first time from a clone will need its nodes laid out again.
@@ -210,5 +214,10 @@ already use.
 > `GIT_OAUTH_AUTHORIZE_PATH` and `GIT_OAUTH_TOKEN_PATH`, and the workbench reads them back so the
 > setup commands it shows always name what the deployment actually serves. SSH is configured with
 > `GIT_SSH_PORT`, `GIT_SSH_PUBLIC_HOST` (when SSH is served from a different host than the
-> workbench), and `GIT_SSH_PUBLICLY_REACHABLE` (set it to `false` where the port stays internal, so
-> the workbench stops offering a URL nobody can reach).
+> workbench), and `GIT_SSH_PUBLICLY_REACHABLE` (which stays `false` unless the port is actually
+> published, so the workbench does not offer a URL nobody can reach).
+>
+> `TRUSTED_PROXY_HOPS` says how many reverse proxies sit in front of the backend, so that failed
+> logins and failed git authentications are counted per client rather than per proxy. It is `0` by
+> default, which trusts `X-Forwarded-For` not at all; set it to the real hop count, and never to
+> more, since a value above the real count is what would let a caller forge its own address.

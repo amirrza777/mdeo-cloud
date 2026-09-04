@@ -104,6 +104,20 @@ resource "kubernetes_deployment_v1" "backend" {
   spec {
     replicas = 1
 
+    # Recreate rather than the default rolling update, and not merely
+    # replicas = 1. GitRepositoryService serializes git access to a project
+    # with a per-process lock, which is only a lock at all while exactly one
+    # backend process exists. A rolling update of a single-replica Deployment
+    # still starts the new pod before terminating the old one (default
+    # maxSurge 25% rounds up to 1, maxUnavailable 25% rounds down to 0), and
+    # the Service routes to both, so two processes would each hold their own
+    # lock and neither would know about the other's in-flight push. Recreate
+    # takes the old pod down first, at the cost of a brief outage during a
+    # deploy, which is the right trade for a single-replica service.
+    strategy {
+      type = "Recreate"
+    }
+
     selector {
       match_labels = {
         "app.kubernetes.io/name" = "backend"
@@ -214,6 +228,11 @@ resource "kubernetes_deployment_v1" "backend" {
                 key  = "ssh_host_key"
               }
             }
+          }
+
+          env {
+            name  = "TRUSTED_PROXY_HOPS"
+            value = tostring(var.trusted_proxy_hops)
           }
 
           # Git access

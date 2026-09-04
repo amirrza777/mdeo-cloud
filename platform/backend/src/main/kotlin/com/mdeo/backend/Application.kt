@@ -149,7 +149,7 @@ fun Application.module(appConfig: AppConfig) {
             appConfig.git.oauthAuthorizePath,
             appConfig.git.oauthTokenPath
         )
-        authRoutes(services.userService, services.jwtService, services.authRateLimiter)
+        authRoutes(services.userService, services.jwtService, services.authRateLimiter, appConfig.trustedProxyHops)
         // Unauthenticated by design: the browser GCM opens has no session
         // yet, and signing in is the whole point of the page.
         oauthRoutes(
@@ -172,7 +172,8 @@ fun Application.module(appConfig: AppConfig) {
             services.personalAccessTokenService,
             services.authRateLimiter,
             services.webSocketNotificationService,
-            appConfig.git.maxPushPackSizeBytes
+            appConfig.git.maxPushPackSizeBytes,
+            appConfig.trustedProxyHops
         )
 
         authenticate(AUTH_SESSION, AUTH_JWT, optional = true) {

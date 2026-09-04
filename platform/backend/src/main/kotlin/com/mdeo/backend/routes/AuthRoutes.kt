@@ -7,7 +7,6 @@ import com.mdeo.backend.service.JwtService
 import com.mdeo.common.model.*
 import com.mdeo.common.model.UserRoles
 import io.ktor.http.*
-import io.ktor.server.plugins.origin
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -19,9 +18,16 @@ import java.time.Instant
  *
  * @param userService Service for user authentication and management
  * @param jwtService Service for JWT operations
- * @param authRateLimiter Throttles login attempts, shared with git's HTTP basic authentication
+ * @param authRateLimiter Throttles failed login attempts, shared with git's HTTP basic authentication
+ * @param trustedProxyHops How many reverse proxies sit in front of this backend; see
+ *   [com.mdeo.backend.plugins.clientAddress]
  */
-fun Route.authRoutes(userService: UserService, jwtService: JwtService, authRateLimiter: AuthRateLimiter) {
+fun Route.authRoutes(
+    userService: UserService,
+    jwtService: JwtService,
+    authRateLimiter: AuthRateLimiter,
+    trustedProxyHops: Int
+) {
     route("/api/auth") {
         /**
          * Authenticates a user and creates a session.
@@ -33,16 +39,23 @@ fun Route.authRoutes(userService: UserService, jwtService: JwtService, authRateL
         post("/login") {
             val request = call.receive<LoginRequest>()
 
-            if (!authRateLimiter.tryAcquire(request.username, call.request.origin.remoteHost)) {
+            // Resolved through the deployment's trusted proxies rather than
+            // taken from the peer, which behind nginx is nginx: keyed on that,
+            // every proxied user would share one bucket and could lock each
+            // other out with their own failed logins.
+            val clientAddress = call.clientAddress(trustedProxyHops)
+            if (!authRateLimiter.isAllowed(request.username, clientAddress)) {
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("error" to "Too many attempts, try again later"))
                 return@post
             }
 
             val user = userService.verifyPassword(request.username, request.password)
             if (user == null) {
+                authRateLimiter.recordFailure(request.username, clientAddress)
                 call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid credentials"))
                 return@post
             }
+            authRateLimiter.recordSuccess(request.username, clientAddress)
             
             call.sessions.set(UserSession(
                 userId = user.id,

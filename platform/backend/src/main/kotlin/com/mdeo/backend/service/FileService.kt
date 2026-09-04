@@ -18,12 +18,28 @@ import kotlin.uuid.toJavaUuid
 import kotlin.uuid.toKotlinUuid
 
 /**
- * Path of the file carrying a project's enabled plugins when served over
- * git. Reserved here, and generated fresh by
- * [com.mdeo.backend.git.GitRepositoryService] rather than ever written
- * through the ordinary file API; see [FileService.checkNotReserved].
+ * File extension reserved for MDEO's own generated project metadata.
+ *
+ * The reservation is on the extension rather than on one exact path,
+ * because that is the thing the platform can actually keep free: every
+ * project file belongs to a registered language plugin and so carries that
+ * plugin's extension, and [PluginService] refuses to register a plugin
+ * claiming this one. Nothing a user can legitimately create ends in
+ * `.mdeo`, so anything MDEO generates under it is collision-free by
+ * construction - including against the directory a path like
+ * `something.mdeo/file.txt` would otherwise have created.
  */
-const val RESERVED_PLUGINS_PATH = ".mdeo"
+const val RESERVED_FILE_EXTENSION = ".mdeo"
+
+/**
+ * The single file that extension is currently used for: a project's
+ * metadata as served over git, carrying its enabled plugins.
+ *
+ * Generated fresh by [com.mdeo.backend.git.GitRepositoryService] on every
+ * fetch rather than ever stored as an ordinary file, and never writable
+ * through the file API; see [FileService.checkNotReserved].
+ */
+const val RESERVED_PROJECT_FILE = "project$RESERVED_FILE_EXTENSION"
 
 /**
  * Service for managing files and directories within projects.
@@ -33,30 +49,36 @@ const val RESERVED_PLUGINS_PATH = ".mdeo"
 class FileService(services: InjectedServices) : BaseService(), InjectedServices by services {
 
     /**
-     * Returns a failure result if [path] is a reserved path a project may not
-     * write to directly.
+     * Returns a failure result if [path] uses the reserved
+     * [RESERVED_FILE_EXTENSION], which a project may not write to directly.
      *
-     * `.mdeo` carries a project's enabled plugins when served over git (see
-     * [com.mdeo.backend.git.GitRepositoryService]), generated from the
-     * database rather than stored as an ordinary file. Reserving the name
-     * here, not just skipping it when a git commit is applied, is what
-     * actually keeps it out of collision with real project content: without
-     * this, an old client that had it locally, a `git add .`, or the file
-     * explorer's own UI could create a real row at that exact path, which
-     * would then make every later git operation on the project fail (two
-     * entries claiming the same path in one tree).
+     * Reserving this here, not just skipping the generated file when a git
+     * commit is applied, is what actually keeps it out of collision with
+     * real project content: without it, an old client that had the file
+     * locally, a `git add .`, or the file explorer's own UI could create a
+     * real row at that path, and every later git operation on the project
+     * would then fail with two entries claiming the same path in one tree.
+     *
+     * Every segment is checked, not just the last one, so `report.mdeo/x.txt`
+     * is refused too. That path would otherwise have [ensureParentDirectories]
+     * create a `report.mdeo` *directory*, which collides in exactly the same
+     * way with a generated file of that name - the reservation has to cover
+     * the whole namespace the extension could ever name, not only files.
      *
      * @param path The already-normalized path to check
      * @return ApiResult.Failure if the path is reserved, null otherwise
      */
     private fun checkNotReserved(path: String): ApiResult.Failure? {
-        return if (path == RESERVED_PLUGINS_PATH) {
-            ApiResult.Failure(
-                ApiError(ErrorCodes.RESERVED_PATH, "'$path' is reserved and cannot be written to directly")
+        val reserved = path.split('/').firstOrNull {
+            it.endsWith(RESERVED_FILE_EXTENSION, ignoreCase = true)
+        } ?: return null
+
+        return ApiResult.Failure(
+            ApiError(
+                ErrorCodes.RESERVED_PATH,
+                "'$reserved' uses the reserved '$RESERVED_FILE_EXTENSION' extension and cannot be written to directly"
             )
-        } else {
-            null
-        }
+        )
     }
 
     /**

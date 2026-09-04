@@ -211,11 +211,21 @@
 
                                             <div class="flex flex-wrap items-center gap-1.5">
                                                 <span
-                                                    v-if="token.projects.length === 0"
+                                                    v-if="!token.scoped"
                                                     class="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[11px] text-muted-foreground"
                                                 >
                                                     <Globe class="size-3" />
                                                     All projects
+                                                </span>
+                                                <!-- A scoped token whose projects have all been
+                                                 deleted reaches nothing at all, which is very
+                                                 much not the same as reaching everything. -->
+                                                <span
+                                                    v-else-if="token.projects.length === 0"
+                                                    class="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-0.5 text-[11px] text-destructive"
+                                                >
+                                                    <FolderGit2 class="size-3" />
+                                                    No projects left
                                                 </span>
                                                 <span
                                                     v-for="scoped in token.projects.slice(0, 3)"

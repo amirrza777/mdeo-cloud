@@ -2,6 +2,7 @@ package com.mdeo.backend.routes
 
 import com.mdeo.backend.git.GitRepositoryService
 import com.mdeo.backend.git.parseProjectIdFromGitPath
+import com.mdeo.backend.plugins.clientAddress
 import com.mdeo.backend.service.AuthRateLimiter
 import com.mdeo.backend.service.PersonalAccessTokenService
 import com.mdeo.backend.service.ProjectPermission
@@ -11,7 +12,6 @@ import com.mdeo.backend.service.WebSocketNotificationService
 import com.mdeo.common.model.UserRoles
 import io.ktor.http.*
 import io.ktor.server.application.*
-import io.ktor.server.plugins.origin
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
@@ -48,7 +48,9 @@ private val logger = LoggerFactory.getLogger("GitRoutes")
  * @param projectService Used to check the caller may read the project
  * @param userService Used to verify basic credentials
  * @param personalAccessTokenService Used to verify a token offered in place of the account password
- * @param authRateLimiter Throttles basic-auth attempts, shared with the login route
+ * @param authRateLimiter Throttles failed basic-auth attempts, shared with the login route
+ * @param trustedProxyHops How many reverse proxies sit in front of this backend; see
+ *   [com.mdeo.backend.plugins.clientAddress]
  * @param webSocketNotificationService Notifies open workbench tabs after a push changes files
  * @param maxPushPackSizeBytes Largest pack a push may send; see [com.mdeo.backend.config.GitConfig]
  */
@@ -59,7 +61,8 @@ fun Route.gitRoutes(
     personalAccessTokenService: PersonalAccessTokenService,
     authRateLimiter: AuthRateLimiter,
     webSocketNotificationService: WebSocketNotificationService,
-    maxPushPackSizeBytes: Long
+    maxPushPackSizeBytes: Long,
+    trustedProxyHops: Int
 ) {
     route("/git/{projectId}") {
         /**
@@ -77,7 +80,14 @@ fun Route.gitRoutes(
             val permission =
                 if (service == "git-receive-pack") ProjectPermission.WRITE else ProjectPermission.READ
             val authorization =
-                call.authorizeGit(projectService, userService, personalAccessTokenService, authRateLimiter, permission) ?: return@get
+                call.authorizeGit(
+                    projectService,
+                    userService,
+                    personalAccessTokenService,
+                    authRateLimiter,
+                    trustedProxyHops,
+                    permission
+                ) ?: return@get
 
             // JGit's pack IO and Postgres access are both blocking, so this
             // runs off Ktor's own coroutine dispatcher. Reads take the same
@@ -121,7 +131,14 @@ fun Route.gitRoutes(
          */
         post("/git-upload-pack") {
             val authorization =
-                call.authorizeGit(projectService, userService, personalAccessTokenService, authRateLimiter, ProjectPermission.READ) ?: return@post
+                call.authorizeGit(
+                    projectService,
+                    userService,
+                    personalAccessTokenService,
+                    authRateLimiter,
+                    trustedProxyHops,
+                    ProjectPermission.READ
+                ) ?: return@post
 
             withContext(Dispatchers.IO) {
                 gitRepositoryService.withProjectLock(authorization.projectId) {
@@ -151,7 +168,14 @@ fun Route.gitRoutes(
          */
         post("/git-receive-pack") {
             val authorization =
-                call.authorizeGit(projectService, userService, personalAccessTokenService, authRateLimiter, ProjectPermission.WRITE) ?: return@post
+                call.authorizeGit(
+                    projectService,
+                    userService,
+                    personalAccessTokenService,
+                    authRateLimiter,
+                    trustedProxyHops,
+                    ProjectPermission.WRITE
+                ) ?: return@post
 
             withContext(Dispatchers.IO) {
                 gitRepositoryService.withProjectLock(authorization.projectId) {
@@ -314,7 +338,9 @@ private data class GitAuthorization(val projectId: UUID, val isProjectAdmin: Boo
  * @param projectService Used to check project permissions
  * @param userService Used to verify the supplied credentials when they are the account password
  * @param personalAccessTokenService Used to verify the supplied credentials when they are a token
- * @param authRateLimiter Throttles repeated attempts before they reach bcrypt
+ * @param authRateLimiter Throttles repeated failed attempts before they reach bcrypt
+ * @param trustedProxyHops How many reverse proxies sit in front of this backend; see
+ *   [com.mdeo.backend.plugins.clientAddress]
  * @param permission The permission the caller needs on the project
  * @return The authorization when access is allowed, or null when a response
  *   has already been sent
@@ -324,6 +350,7 @@ private suspend fun ApplicationCall.authorizeGit(
     userService: UserService,
     personalAccessTokenService: PersonalAccessTokenService,
     authRateLimiter: AuthRateLimiter,
+    trustedProxyHops: Int,
     permission: ProjectPermission
 ): GitAuthorization? {
     val projectId = parameters["projectId"]?.let { parseProjectIdFromGitPath(it) }
@@ -346,7 +373,12 @@ private suspend fun ApplicationCall.authorizeGit(
     val username = credentials.substringBefore(':')
     val password = credentials.substringAfter(':', "")
 
-    if (!authRateLimiter.tryAcquire(username, request.origin.remoteHost)) {
+    // Resolved through the deployment's trusted proxies rather than taken
+    // from the peer, which behind nginx is nginx: keyed on that, every
+    // proxied user would share one bucket, and normal git traffic from a
+    // handful of people would exhaust it between them.
+    val clientAddress = clientAddress(trustedProxyHops)
+    if (!authRateLimiter.isAllowed(username, clientAddress)) {
         respond(HttpStatusCode.TooManyRequests, "Too many attempts, try again later")
         return null
     }
@@ -358,10 +390,15 @@ private suspend fun ApplicationCall.authorizeGit(
     val verifiedToken = personalAccessTokenService.verifyToken(password)
     val user = verifiedToken?.user ?: userService.verifyPassword(username, password)
     if (user == null) {
+        authRateLimiter.recordFailure(username, clientAddress)
         response.header(HttpHeaders.WWWAuthenticate, "Basic realm=\"MDEO Cloud\"")
         respond(HttpStatusCode.Unauthorized, "Invalid credentials")
         return null
     }
+    // Cleared on success, so the two authenticated requests smart HTTP makes
+    // per clone, fetch or push never accumulate against a user who is
+    // getting their credentials right.
+    authRateLimiter.recordSuccess(username, clientAddress)
 
     // A token scoped to other projects is treated exactly like a caller
     // with no access to this one: the same answer as an unknown project,

@@ -3,7 +3,8 @@ package com.mdeo.backend.git
 import com.mdeo.backend.database.FilesTable
 import com.mdeo.backend.service.FileService
 import com.mdeo.backend.service.PluginService
-import com.mdeo.backend.service.RESERVED_PLUGINS_PATH
+import com.mdeo.backend.service.RESERVED_FILE_EXTENSION
+import com.mdeo.backend.service.RESERVED_PROJECT_FILE
 import com.mdeo.common.model.ApiResult
 import com.mdeo.common.model.FileType
 import com.mdeo.backend.database.GitPacksTable
@@ -58,19 +59,23 @@ class GitRepositoryService(
     private val logger = LoggerFactory.getLogger(GitRepositoryService::class.java)
 
     /**
-     * Path of the file carrying a project's enabled plugins.
+     * Path of the generated file carrying a project's metadata, currently its
+     * enabled plugins.
      *
-     * A single reserved dotfile rather than a directory, deliberately: with
-     * only ever one such file, a bare name with no extension is easy to keep
-     * out of collision with real project content (which always belongs to a
-     * registered language plugin, and so always has a meaningful extension),
-     * and reserving one exact path is simpler than reserving a whole prefix.
-     * Diagram layout was considered too (see issue #29) but left out: it is
-     * purely representational, changes on practically every diagram
-     * interaction, and would turn the commit-on-fetch boundary into a commit
-     * on every look rather than one on real change.
+     * One file rather than a `.mdeo/` directory, deliberately. What the
+     * platform can actually keep free is the `.mdeo` *extension*: every
+     * project file belongs to a registered language plugin and so carries
+     * that plugin's extension, and `PluginService` refuses to register a
+     * plugin claiming this one, so nothing a user can legitimately create
+     * ever ends that way. Reserving a directory name instead would take a
+     * whole prefix out of the project's namespace for no more safety.
+     *
+     * Diagram layout was considered for this file too (see issue #29) but
+     * left out: it is purely representational, changes on practically every
+     * diagram interaction, and would turn the commit-on-fetch boundary into a
+     * commit on every look rather than one on real change.
      */
-    val pluginsPath = RESERVED_PLUGINS_PATH
+    val projectFilePath = RESERVED_PROJECT_FILE
 
     /**
      * Branch a project's files are published on, and the only one a push may
@@ -165,7 +170,7 @@ class GitRepositoryService(
      * Writes the project's current files as a commit, unless the branch already
      * points at exactly this content.
      *
-     * Always includes [pluginsPath], even for a project with no ordinary
+     * Always includes [projectFilePath], even for a project with no ordinary
      * files yet: a project's plugin selection is real content the moment it
      * has one, not something that only starts existing once a file does, and
      * the alternative (skipping publication entirely while `files` is empty)
@@ -177,20 +182,19 @@ class GitRepositoryService(
      */
     private fun publishCurrentFiles(repository: PostgresDfsRepository, projectId: UUID): ObjectId {
         val currentHead: ObjectId? = repository.resolve(branch)
-        // Defensive: FileService rejects writes to pluginsPath (see
-        // applyCommitToProject's doc comment on why this cannot actually
-        // happen through the ordinary write path), but filtering it out
-        // here too means a stray row from before that reservation existed
-        // cannot collide with the generated entry added below.
-        val files = readProjectFiles(projectId).filter { it.first != pluginsPath }
-        val pluginsContent = pluginsFileContent(repository, currentHead, projectId)
+        val files = readProjectFiles(projectId)
+        // Recorded before the early return below, so a fetch that publishes
+        // nothing new still leaves a push in the same request checking
+        // against the state it actually advertised.
+        repository.publishedFileVersions = files.associate { it.path to it.version }
+        val projectFileContent = projectFileContent(repository, currentHead, projectId)
 
         repository.newObjectInserter().use { inserter ->
             // DirCache builds the nested trees from flat paths, so directories
             // in the files table do not need to be walked. Git infers them.
             val dirCache = DirCache.newInCore()
             val builder = dirCache.builder()
-            for ((path, content) in files + (pluginsPath to pluginsContent)) {
+            for ((path, content) in files.map { it.path to it.content } + (projectFilePath to projectFileContent)) {
                 val entry = DirCacheEntry(path)
                 entry.fileMode = FileMode.REGULAR_FILE
                 entry.setObjectId(inserter.insert(Constants.OBJ_BLOB, content))
@@ -241,29 +245,33 @@ class GitRepositoryService(
     /**
      * Writes the contents of a pushed commit back into the project's files.
      *
-     * Every path in the commit, except [pluginsPath], is written through the
-     * ordinary file service, so a push goes through exactly the same
+     * Every path in the commit, except [projectFilePath], is written through
+     * the ordinary file service, so a push goes through exactly the same
      * validation, version bump and project locking as an edit made in the
      * workbench. Files the commit no longer contains are deleted, which is
      * what makes a push replace the project rather than only add to it.
-     * [pluginsPath] is handled separately: it replaces the project's enabled
-     * plugins rather than being written as a file, and its absence from the
-     * pushed tree leaves plugins untouched rather than clearing them. Since
-     * [pluginsPath] is always removed from the pushed tree before any of it
-     * reaches [FileService], and [FileService] independently refuses to
-     * write there itself, a project file can never end up at that exact
-     * path through either route.
+     * [projectFilePath] is handled separately: it replaces the project's
+     * enabled plugins rather than being written as a file, and its absence
+     * from the pushed tree leaves plugins untouched rather than clearing
+     * them. Since [projectFilePath] is always removed from the pushed tree
+     * before any of it reaches [FileService], and [FileService] independently
+     * refuses to write anything using the reserved extension itself, a
+     * project file can never end up at that path through either route.
      *
      * Changing a project's plugins is normally gated on project admin
      * permission (see `PluginRoutes.kt`), not merely write access, so a
-     * pushed [pluginsPath] is held to the same bar: [callerIsProjectAdmin]
+     * pushed [projectFilePath] is held to the same bar: [callerIsProjectAdmin]
      * must be true, or the whole push is rejected rather than silently
      * dropping just that part of it.
      *
-     * Note that clients with the project open are not told about this. The
-     * platform has no file change broadcast at all today, so an edit made in
-     * one browser tab is equally invisible to another. That is a gap worth
-     * closing, but it is not specific to pushing.
+     * The push is applied only if the project still holds exactly the files
+     * that were published when this request opened the repository. The
+     * per-project git lock keeps other git operations out, but the
+     * workbench's writes do not take it, so a browser edit landing while a
+     * push is being unpacked would otherwise be silently reverted by a push
+     * that never saw it. Rejecting is the right answer rather than merging:
+     * a pushed tree replaces the project wholesale, so any concurrent edit
+     * genuinely conflicts with it, and the user fetches and pushes again.
      *
      * @param repository The project's repository, holding the pushed objects
      * @param projectId The project to update
@@ -330,18 +338,32 @@ class GitRepositoryService(
         }
 
         // Every push's tree walk covers the whole commit, not a diff against
-        // the previous one, so pluginsPath is in `pushed` on every push that
-        // has ever touched it, whether or not this particular push actually
-        // changes what it says. Comparing against the project's current
-        // plugins (the same comparison pluginsFileContent already makes) is
-        // what tells a push that merely round-trips the file apart from one
-        // that really is trying to change it, so an ordinary write-access
-        // push is not held to the admin bar for content it never modified.
-        val pushedPlugins = pushed.remove(pluginsPath)
-        val pluginsChanged = pushedPlugins != null &&
-            !GitPluginsFile.describes(pushedPlugins, pluginService.getProjectPluginUrls(projectId))
-        if (pluginsChanged && !callerIsProjectAdmin) {
-            return "changing a project's plugins ($pluginsPath) requires project admin permission"
+        // the previous one, so projectFilePath is in `pushed` on every push
+        // that has ever touched it, whether or not this particular push
+        // actually changes what it says. Comparing against the project's
+        // current plugins (the same comparison projectFileContent already
+        // makes) is what tells a push that merely round-trips the file apart
+        // from one that really is trying to change it, so an ordinary
+        // write-access push is not held to the admin bar for content it never
+        // modified.
+        //
+        // Parsed here rather than where it is applied below, so a malformed
+        // file is refused before the push has written anything at all.
+        val pushedProjectFile = pushed.remove(projectFilePath)
+        val pushedPlugins = if (pushedProjectFile == null) {
+            null
+        } else {
+            val contents = GitProjectFile.parse(pushedProjectFile)
+                ?: return "could not read $projectFilePath: not a JSON object with a plugins array of urls"
+            contents.plugins
+        }
+        // Null when the push asks for no plugin change at all: either it did
+        // not carry the file, or carried one describing exactly what the
+        // project already has.
+        val changedPlugins = pushedPlugins
+            ?.takeIf { it != pluginService.getProjectPluginUrls(projectId).sorted() }
+        if (changedPlugins != null && !callerIsProjectAdmin) {
+            return "changing a project's plugins ($projectFilePath) requires project admin permission"
         }
 
         // A single outer transaction, so a failure partway through (one path
@@ -351,12 +373,20 @@ class GitRepositoryService(
         // this one on the same thread instead of committing separately.
         return try {
             transaction {
-                val existing = readProjectFiles(projectId)
+                // Indexed by path rather than scanned per pushed file: a push
+                // carries the whole tree, so a linear search here would make
+                // applying one O(files squared), and nothing bounds a
+                // project's file count (the pack limit bounds bytes).
+                val existing = readProjectFiles(projectId).associateBy { it.path }
+
+                if (existing.mapValues { it.value.version } != repository.publishedFileVersions) {
+                    throw GitPushRejected(
+                        "the project changed while this push was being applied; fetch, merge and push again"
+                    )
+                }
 
                 for ((path, content) in pushed) {
-                    val unchanged = existing.any { (existingPath, existingContent) ->
-                        existingPath == path && existingContent.contentEquals(content)
-                    }
+                    val unchanged = existing[path]?.content?.contentEquals(content) == true
                     if (unchanged) {
                         // Writing back exactly what is already stored would
                         // still bump the file's version and invalidate every
@@ -373,7 +403,7 @@ class GitRepositoryService(
                     }
                 }
 
-                for (path in existing.map { it.first }.toSet() - pushed.keys) {
+                for (path in existing.keys - pushed.keys) {
                     val result = fileService.delete(projectId, path, recursive = false)
                     if (result is ApiResult.Failure) {
                         throw GitPushRejected("could not delete $path: ${result.error.message}")
@@ -387,18 +417,17 @@ class GitRepositoryService(
                 // anywhere.
                 removeEmptyDirectories(projectId)
 
-                // Absent rather than empty is treated as "not managed by this
-                // push", so a client that never touched pluginsPath cannot
-                // silently clear every plugin a project has enabled. Applied
-                // only when it actually changed (not merely present, which
-                // it is on every push): setProjectPlugins invalidates every
-                // computed AST for the whole project, so running it on a
-                // push that only round-trips the same plugin set unchanged
-                // would cost a full recompute for nothing.
-                if (pluginsChanged) {
-                    val urls = GitPluginsFile.parse(pushedPlugins)
-                        ?: throw GitPushRejected("could not read $pluginsPath: not a JSON array of urls")
-                    val unknown = pluginService.setProjectPlugins(projectId, urls)
+                // A missing file, or one with no `plugins` key, is treated as
+                // "not managed by this push", so a client that never touched
+                // projectFilePath cannot silently clear every plugin a
+                // project has enabled. Applied only when it actually changed
+                // (not merely present, which it is on every push):
+                // setProjectPlugins invalidates every computed AST for the
+                // whole project, so running it on a push that only
+                // round-trips the same plugin set unchanged would cost a full
+                // recompute for nothing.
+                if (changedPlugins != null) {
+                    val unknown = pluginService.setProjectPlugins(projectId, changedPlugins)
                     if (unknown.isNotEmpty()) {
                         logger.info(
                             "Project {} push referenced unregistered plugin urls, skipped: {}",
@@ -424,29 +453,30 @@ class GitRepositoryService(
     }
 
     /**
-     * Builds the contents of [pluginsPath]: the project's enabled plugins, as
-     * their registered urls.
+     * Builds the contents of [projectFilePath]: the project's metadata, which
+     * today is its enabled plugins as their registered urls.
      *
-     * A pushed [pluginsPath] can be formatted however the client wrote it, so
-     * regenerating a fresh, canonically formatted array every time would make
-     * the very next fetch look like a change even when the enabled plugins
-     * are exactly what was just pushed. To avoid that, the current head's own
-     * bytes are reused whenever they already describe the same set of urls,
-     * and a fresh array is only built the first time or after a real change
-     * (for instance through the workbench's plugin settings, not git).
+     * A pushed [projectFilePath] can be formatted however the client wrote
+     * it, so regenerating a fresh, canonically formatted document every time
+     * would make the very next fetch look like a change even when the enabled
+     * plugins are exactly what was just pushed. To avoid that, the current
+     * head's own bytes are reused whenever they already describe the same set
+     * of urls, and a fresh document is only built the first time or after a
+     * real change (for instance through the workbench's plugin settings, not
+     * git).
      *
      * @param repository The project's repository
      * @param currentHead The branch's current head, or null before any commit
      * @param projectId The project to read enabled plugins for
-     * @return The JSON array content, encoded as bytes
+     * @return The JSON content, encoded as bytes
      */
-    private fun pluginsFileContent(repository: PostgresDfsRepository, currentHead: ObjectId?, projectId: UUID): ByteArray {
+    private fun projectFileContent(repository: PostgresDfsRepository, currentHead: ObjectId?, projectId: UUID): ByteArray {
         val urls = pluginService.getProjectPluginUrls(projectId)
-        val existing = currentHead?.let { readPathAt(repository, it, pluginsPath) }
-        if (existing != null && GitPluginsFile.describes(existing, urls)) {
+        val existing = currentHead?.let { readPathAt(repository, it, projectFilePath) }
+        if (existing != null && GitProjectFile.describes(existing, urls)) {
             return existing
         }
-        return GitPluginsFile.serialize(urls)
+        return GitProjectFile.serialize(urls)
     }
 
     /**
@@ -484,17 +514,36 @@ class GitRepositoryService(
         }
 
     /**
-     * Reads every file of a project, with its decoded contents.
+     * One file of a project, as git needs to see it.
+     *
+     * @property path The file's path, relative to the project root
+     * @property content The decoded file content
+     * @property version The file's current version, used to tell whether the
+     *   project still holds what a push was computed against; see
+     *   [PostgresDfsRepository.publishedFileVersions]
+     */
+    private class ProjectFile(val path: String, val content: ByteArray, val version: Int)
+
+    /**
+     * Reads every file of a project git should see, with its decoded
+     * contents and version.
      *
      * Directories are skipped: git records only files, and infers the
      * directories from their paths. File contents are held base64 encoded in a
      * text column, so they are decoded back to bytes here, which also means
      * binary files survive the round trip.
      *
+     * Anything using the reserved extension is skipped as well. [FileService]
+     * refuses to write such a path, so this is defensive, but a stray row
+     * from before that reservation existed would otherwise collide with the
+     * generated [projectFilePath] entry in the same tree - and, because both
+     * callers here have to agree on what "the project's files" means, it has
+     * to be skipped in one place rather than filtered at each of them.
+     *
      * @param projectId The project to read
-     * @return Path to contents, for every file in the project
+     * @return Every file in the project git should see
      */
-    private fun readProjectFiles(projectId: UUID): List<Pair<String, ByteArray>> {
+    private fun readProjectFiles(projectId: UUID): List<ProjectFile> {
         val project = projectId.toKotlinUuid()
         return transaction {
             FilesTable
@@ -504,7 +553,7 @@ class GitRepositoryService(
                 }
                 .mapNotNull { row ->
                     val path = row[FilesTable.path].trimStart('/')
-                    if (path.isEmpty()) {
+                    if (path.isEmpty() || path.endsWith(RESERVED_FILE_EXTENSION, ignoreCase = true)) {
                         return@mapNotNull null
                     }
                     val encoded = row[FilesTable.content] ?: ""
@@ -513,7 +562,7 @@ class GitRepositoryService(
                     } else {
                         Base64.getDecoder().decode(encoded)
                     }
-                    path to bytes
+                    ProjectFile(path, bytes, row[FilesTable.version])
                 }
         }
     }

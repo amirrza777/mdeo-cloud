@@ -497,6 +497,19 @@ object PersonalAccessTokensTable : Table("personal_access_tokens") {
      */
     val tokenPrefix = varchar("token_prefix", 16)
 
+    /**
+     * Whether this token was created with a project scope at all, kept
+     * separately from the scope rows themselves.
+     *
+     * Without it, "scoped to nothing left" and "never scoped" are the same
+     * state, and deleting a project would silently *widen* every token whose
+     * last scoped project it was: the cascade below removes the token's final
+     * scope row, and an empty scope means unscoped. Recorded here once at
+     * creation, so a token narrowed on purpose stays narrowed - and, when
+     * nothing it was narrowed to still exists, reaches nothing at all.
+     */
+    val scoped = bool("scoped").default(false)
+
     val createdAt = timestamp("created_at")
     val lastUsedAt = timestamp("last_used_at").nullable()
     val expiresAt = timestamp("expires_at").nullable()
@@ -548,14 +561,14 @@ object SshPublicKeysTable : Table("ssh_public_keys") {
 /**
  * The projects a personal access token is restricted to.
  *
- * A token with no rows here is unscoped: it can reach every project its
- * owner can, which is what a token created before scoping existed - and
- * what a token deliberately created without a scope - must keep doing.
- * Rows are only ever a *restriction* on top of the owner's own
- * permissions, never a grant: [com.mdeo.backend.routes.gitRoutes] still
- * checks the owner's project permission after narrowing by this scope, so
- * revoking someone's access to a project immediately stops every token
- * they hold, scoped or not.
+ * Whether a token is scoped at all is [PersonalAccessTokensTable.scoped],
+ * not the presence of rows here: a project can be deleted out from under a
+ * scope, and a token that ends up with no rows left has to reach nothing
+ * rather than everything. Rows are only ever a *restriction* on top of the
+ * owner's own permissions, never a grant:
+ * [com.mdeo.backend.routes.gitRoutes] still checks the owner's project
+ * permission after narrowing by this scope, so revoking someone's access to
+ * a project immediately stops every token they hold, scoped or not.
  */
 object PersonalAccessTokenProjectsTable : Table("personal_access_token_projects") {
     val tokenId = uuid("token_id").references(PersonalAccessTokensTable.id, onDelete = ReferenceOption.CASCADE)

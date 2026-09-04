@@ -27,7 +27,13 @@ export interface PersonalAccessTokenInfo {
     createdAt: string;
     lastUsedAt: string | null;
     expiresAt: string | null;
-    /** Projects the token is restricted to; empty means every project its owner can reach. */
+    /**
+     * Whether the token was created restricted to particular projects at all.
+     * A scoped token can still have an empty `projects` list, once every
+     * project it named has been deleted, and then reaches nothing.
+     */
+    scoped: boolean;
+    /** Projects the token is restricted to; only meaningful when `scoped`. */
     projects: TokenProjectScope[];
 }
 
