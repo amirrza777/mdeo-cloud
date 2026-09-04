@@ -61,6 +61,7 @@ object ErrorCodes {
     
     const val USER_NOT_FOUND = "UserNotFound"
     const val INVALID_CREDENTIALS = "InvalidCredentials"
+    const val TOKEN_NOT_FOUND = "TokenNotFound"
     const val LAST_OWNER = "LastOwner"
     const val OWNER_ALREADY_EXISTS = "OwnerAlreadyExists"
     const val OWNER_NOT_FOUND = "OwnerNotFound"

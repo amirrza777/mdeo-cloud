@@ -56,7 +56,8 @@ object DatabaseFactory {
                 ExecutionFileMetadataTable,
                 GitPacksTable,
                 GitPackFilesTable,
-                GitRefsTable
+                GitRefsTable,
+                PersonalAccessTokensTable
             )
         }
         

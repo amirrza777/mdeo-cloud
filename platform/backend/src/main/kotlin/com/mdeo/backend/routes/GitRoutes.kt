@@ -2,6 +2,7 @@ package com.mdeo.backend.routes
 
 import com.mdeo.backend.git.GitRepositoryService
 import com.mdeo.backend.service.AuthRateLimiter
+import com.mdeo.backend.service.PersonalAccessTokenService
 import com.mdeo.backend.service.ProjectPermission
 import com.mdeo.backend.service.ProjectService
 import com.mdeo.backend.service.UserService
@@ -37,12 +38,15 @@ private val logger = LoggerFactory.getLogger("GitRoutes")
  * is needed here is to hand it the streams and get the framing right.
  *
  * These routes deliberately do not use the session cookie. Git clients send
- * HTTP basic credentials, so the same MDEO username and password that works in
- * the browser works here, and nothing new has to be stored.
+ * HTTP basic credentials: the same MDEO username and password that works in
+ * the browser works here, or a personal access token in place of the
+ * password (the recommended option, since it is independently revocable and
+ * never exposes the account password itself).
  *
  * @param gitRepositoryService Opens and publishes project repositories
  * @param projectService Used to check the caller may read the project
  * @param userService Used to verify basic credentials
+ * @param personalAccessTokenService Used to verify a token offered in place of the account password
  * @param authRateLimiter Throttles basic-auth attempts, shared with the login route
  * @param webSocketNotificationService Notifies open workbench tabs after a push changes files
  * @param maxPushPackSizeBytes Largest pack a push may send; see [com.mdeo.backend.config.GitConfig]
@@ -51,6 +55,7 @@ fun Route.gitRoutes(
     gitRepositoryService: GitRepositoryService,
     projectService: ProjectService,
     userService: UserService,
+    personalAccessTokenService: PersonalAccessTokenService,
     authRateLimiter: AuthRateLimiter,
     webSocketNotificationService: WebSocketNotificationService,
     maxPushPackSizeBytes: Long
@@ -71,7 +76,7 @@ fun Route.gitRoutes(
             val permission =
                 if (service == "git-receive-pack") ProjectPermission.WRITE else ProjectPermission.READ
             val authorization =
-                call.authorizeGit(projectService, userService, authRateLimiter, permission) ?: return@get
+                call.authorizeGit(projectService, userService, personalAccessTokenService, authRateLimiter, permission) ?: return@get
 
             // JGit's pack IO and Postgres access are both blocking, so this
             // runs off Ktor's own coroutine dispatcher. Reads take the same
@@ -115,7 +120,7 @@ fun Route.gitRoutes(
          */
         post("/git-upload-pack") {
             val authorization =
-                call.authorizeGit(projectService, userService, authRateLimiter, ProjectPermission.READ) ?: return@post
+                call.authorizeGit(projectService, userService, personalAccessTokenService, authRateLimiter, ProjectPermission.READ) ?: return@post
 
             withContext(Dispatchers.IO) {
                 gitRepositoryService.withProjectLock(authorization.projectId) {
@@ -145,7 +150,7 @@ fun Route.gitRoutes(
          */
         post("/git-receive-pack") {
             val authorization =
-                call.authorizeGit(projectService, userService, authRateLimiter, ProjectPermission.WRITE) ?: return@post
+                call.authorizeGit(projectService, userService, personalAccessTokenService, authRateLimiter, ProjectPermission.WRITE) ?: return@post
 
             withContext(Dispatchers.IO) {
                 gitRepositoryService.withProjectLock(authorization.projectId) {
@@ -306,7 +311,8 @@ private data class GitAuthorization(val projectId: UUID, val isProjectAdmin: Boo
  * makes a client prompt for a username and password rather than simply fail.
  *
  * @param projectService Used to check project permissions
- * @param userService Used to verify the supplied credentials
+ * @param userService Used to verify the supplied credentials when they are the account password
+ * @param personalAccessTokenService Used to verify the supplied credentials when they are a token
  * @param authRateLimiter Throttles repeated attempts before they reach bcrypt
  * @param permission The permission the caller needs on the project
  * @return The authorization when access is allowed, or null when a response
@@ -315,6 +321,7 @@ private data class GitAuthorization(val projectId: UUID, val isProjectAdmin: Boo
 private suspend fun ApplicationCall.authorizeGit(
     projectService: ProjectService,
     userService: UserService,
+    personalAccessTokenService: PersonalAccessTokenService,
     authRateLimiter: AuthRateLimiter,
     permission: ProjectPermission
 ): GitAuthorization? {
@@ -345,7 +352,11 @@ private suspend fun ApplicationCall.authorizeGit(
         return null
     }
 
-    val user = userService.verifyPassword(username, password)
+    // A token is recognized by its prefix, so an ordinary password never
+    // reaches (and never has to pay the cost of) a token lookup, and a
+    // token never falls through to a bcrypt comparison it could not
+    // possibly match.
+    val user = personalAccessTokenService.verifyToken(password) ?: userService.verifyPassword(username, password)
     if (user == null) {
         response.header(HttpHeaders.WWWAuthenticate, "Basic realm=\"MDEO Cloud\"")
         respond(HttpStatusCode.Unauthorized, "Invalid credentials")

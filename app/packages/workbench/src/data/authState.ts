@@ -122,4 +122,30 @@ export class AuthState {
     async changePassword(currentPassword: string, newPassword: string) {
         return this.backendApi.auth.changePassword(currentPassword, newPassword);
     }
+
+    /**
+     * Creates a new personal access token for the current user.
+     *
+     * @param name A label to tell this token apart from others later
+     * @param expiresAt When the token stops working, or undefined for no expiry
+     */
+    async createToken(name: string, expiresAt?: string) {
+        return this.backendApi.auth.createToken(name, expiresAt);
+    }
+
+    /**
+     * Lists the current user's own personal access tokens.
+     */
+    async listTokens() {
+        return this.backendApi.auth.listTokens();
+    }
+
+    /**
+     * Revokes one of the current user's own personal access tokens.
+     *
+     * @param tokenId The token to revoke
+     */
+    async revokeToken(tokenId: string) {
+        return this.backendApi.auth.revokeToken(tokenId);
+    }
 }
