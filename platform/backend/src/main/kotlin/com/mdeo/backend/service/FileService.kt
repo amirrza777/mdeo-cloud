@@ -82,24 +82,28 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
     }
 
     /**
-     * Returns the version number a newly (re)created file at [path] should
-     * start at, guaranteed higher than any version that path has ever used
-     * before, even across a delete in between.
+     * Returns the version number the file that will now exist at [path]
+     * should carry, guaranteed higher than any version that path has ever
+     * used before, even across a delete in between.
      *
-     * A plain per-row counter, reset by [FilesTable.insert] to 1 every time,
-     * would let a deleted-then-recreated file collide with a stale cache
+     * Every write that changes what lives at a path - creating it, editing
+     * it, or renaming another file onto it - must go through this rather
+     * than incrementing the row's own `version` column in place: a plain
+     * per-row counter, reset to 1 by [FilesTable.insert] and merely bumped
+     * by an in-place `version + 1` otherwise, would let a deleted-then-
+     * recreated (or renamed-away-and-back) file collide with a stale cache
      * entry elsewhere that recorded a dependency on the old file at that
-     * same version 1 (the common case for a file that was created and never
-     * edited). [FileVersionCountersTable] tracks the next version
-     * separately, in a row this method never deletes, so it survives the
-     * file's own row being deleted and keeps counting up from there.
+     * same version number. [FileVersionCountersTable] tracks the next
+     * version separately, in a row this method never deletes, so it
+     * survives the file's own row being deleted or renamed and keeps
+     * counting up from there.
      *
      * The insert and the conflict-driven increment are one atomic statement
-     * so two concurrent creations at the same path can never be handed the
+     * so two concurrent writers at the same path can never be handed the
      * same version.
      *
      * @param projectId The project the file belongs to
-     * @param path The already-normalized path being (re)created
+     * @param path The already-normalized path the new version is for
      * @return A version number never used before for this exact path
      */
     private fun JdbcTransaction.nextVersion(projectId: UUID, path: String): Int {
@@ -230,19 +234,45 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
                 if (!overwrite) {
                     return@transaction fileSystemFailure(ErrorCodes.FILE_EXISTS, "File already exists: $path")
                 }
-                if (expectedVersion != null && existing[FilesTable.version] != expectedVersion) {
+                val currentVersion = existing[FilesTable.version]
+                if (expectedVersion != null && currentVersion != expectedVersion) {
                     return@transaction fileSystemFailure(
                         ErrorCodes.VERSION_CONFLICT,
-                        "File $path is at version ${existing[FilesTable.version]}, expected $expectedVersion"
+                        "File $path is at version $currentVersion, expected $expectedVersion"
                     )
                 }
 
-                val currentVersion = existing[FilesTable.version]
                 val contentText = Base64.getEncoder().encodeToString(content)
-                FilesTable.update({ (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.path eq normalizedPath) }) {
-                    it[FilesTable.content] = contentText
-                    it[version] = currentVersion + 1
-                    it[updatedAt] = now
+                val newVersion = nextVersion(projectId, normalizedPath)
+                if (expectedVersion != null) {
+                    // The precondition check above is not by itself a compare-and-set: another
+                    // writer could commit between that SELECT and this UPDATE. Folding the same
+                    // condition into the UPDATE's own WHERE clause makes the database enforce it
+                    // atomically instead, so at most one of two racing writers with the same
+                    // expectedVersion can ever have its update actually apply.
+                    val updatedRows = FilesTable.update({
+                        (FilesTable.projectId eq projectId.toKotlinUuid()) and
+                        (FilesTable.path eq normalizedPath) and
+                        (FilesTable.version eq expectedVersion)
+                    }) {
+                        it[FilesTable.content] = contentText
+                        it[version] = newVersion
+                        it[updatedAt] = now
+                    }
+                    if (updatedRows == 0) {
+                        return@transaction fileSystemFailure(
+                            ErrorCodes.VERSION_CONFLICT,
+                            "File $path was modified concurrently, please retry"
+                        )
+                    }
+                } else {
+                    FilesTable.update({
+                        (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.path eq normalizedPath)
+                    }) {
+                        it[FilesTable.content] = contentText
+                        it[version] = newVersion
+                        it[updatedAt] = now
+                    }
                 }
             } else {
                 if (!create) {
@@ -506,13 +536,14 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
                 renameDirectoryChildren(projectId, normalizedFrom, normalizedTo)
             }
             
-            FilesTable.update({ 
-                (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.path eq normalizedFrom) 
+            val renamedVersion = nextVersion(projectId, normalizedTo)
+            FilesTable.update({
+                (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.path eq normalizedFrom)
             }) {
                 it[path] = normalizedTo
                 it[parentPath] = newParent
                 it[updatedAt] = now
-                it[version] = version + 1
+                it[version] = renamedVersion
             }
             
             success(Unit)
@@ -580,25 +611,26 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
      * @param oldPath The old directory path
      * @param newPath The new directory path
      */
-    private fun renameDirectoryChildren(projectId: UUID, oldPath: String, newPath: String) {
+    private fun JdbcTransaction.renameDirectoryChildren(projectId: UUID, oldPath: String, newPath: String) {
         val prefix = if (oldPath.isEmpty()) "" else "$oldPath/"
         val newPrefix = if (newPath.isEmpty()) "" else "$newPath/"
-        
+
         FilesTable.selectAll()
-            .where { 
-                (FilesTable.projectId eq projectId.toKotlinUuid()) and 
-                (FilesTable.path like "$prefix%") 
+            .where {
+                (FilesTable.projectId eq projectId.toKotlinUuid()) and
+                (FilesTable.path like "$prefix%")
             }
             .forEach { row ->
                 val oldChildPath = row[FilesTable.path]
                 val newChildPath = newPrefix + oldChildPath.substring(prefix.length)
-                
-                FilesTable.update({ 
-                    (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.path eq oldChildPath) 
+                val newChildVersion = nextVersion(projectId, newChildPath)
+
+                FilesTable.update({
+                    (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.path eq oldChildPath)
                 }) {
                     it[path] = newChildPath
                     it[updatedAt] = Instant.now()
-                    it[version] = version + 1
+                    it[version] = newChildVersion
                 }
             }
     }

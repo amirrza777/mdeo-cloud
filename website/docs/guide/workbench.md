@@ -151,8 +151,15 @@ You can also create a token by hand from the **Account** dialog's **Access token
 it as the password:
 
 ```
-git clone https://<username>:<token>@<host>/git/<project-id>.git
+git clone https://<username>@<host>/git/<project-id>.git
 ```
+
+Git prompts for a password on the terminal; paste the token there rather than putting it in the URL
+itself. A URL with `<username>:<token>@` embedded in it is saved verbatim in your shell history and
+in `.git/config`'s `remote.origin.url`, so anyone who later reads either one recovers the raw token -
+pasting it only at the prompt keeps it out of both. For unattended use where there is no prompt to
+answer, a [credential helper](https://git-scm.com/docs/gitcredentials) is the right place to store it
+instead of the URL.
 
 This is what you want for anything that has no browser to open - a CI job, a container, a script.
 
