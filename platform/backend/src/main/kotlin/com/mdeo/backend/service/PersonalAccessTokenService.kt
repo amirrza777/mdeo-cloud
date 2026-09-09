@@ -195,6 +195,11 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
      * comparison, so unlike password verification this is not a
      * meaningful CPU cost to rate-limit against.
      *
+     * Deliberately does not record use here: a hash match only means the
+     * credential is valid, not that the request it came with was actually
+     * allowed to do anything, and a caller still has scope and permission
+     * checks of its own to run after this returns. See [recordTokenUsed].
+     *
      * @return The token's owning user, or null if the token is unknown,
      *   expired, or does not start with the recognized prefix at all
      */
@@ -224,10 +229,6 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
             }
 
             val tokenId = row[PersonalAccessTokensTable.id]
-            PersonalAccessTokensTable.update({ PersonalAccessTokensTable.id eq tokenId }) {
-                it[lastUsedAt] = Instant.now()
-            }
-
             val scope = PersonalAccessTokenProjectsTable
                 .select(PersonalAccessTokenProjectsTable.projectId)
                 .where { PersonalAccessTokenProjectsTable.tokenId eq tokenId }
@@ -235,6 +236,7 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
                 .toSet()
 
             VerifiedToken(
+                tokenId = tokenId.toJavaUuid(),
                 user = User(
                     id = row[UsersTable.id].toJavaUuid().toString(),
                     username = row[UsersTable.username],
@@ -243,6 +245,24 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
                 scoped = row[PersonalAccessTokensTable.scoped],
                 scopedProjectIds = scope
             )
+        }
+    }
+
+    /**
+     * Records that a token was actually used to complete an authorized
+     * request. Mirrors [SshKeyService.recordKeyUsed]: called only once every
+     * check that could still reject the request - project scope, then
+     * project permission - has passed, so the "last used" timestamp shown to
+     * a token's owner (to help them spot a leaked one) reflects a request it
+     * was actually allowed to make, not merely one whose hash matched.
+     *
+     * @param tokenId The token that authenticated and was then allowed through
+     */
+    fun recordTokenUsed(tokenId: UUID) {
+        transaction {
+            PersonalAccessTokensTable.update({ PersonalAccessTokensTable.id eq tokenId.toKotlinUuid() }) {
+                it[lastUsedAt] = Instant.now()
+            }
         }
     }
 
@@ -283,6 +303,8 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
  * A personal access token that has been checked and found valid, together
  * with what it is allowed to reach.
  *
+ * @property tokenId The token's own id, for [PersonalAccessTokenService.recordTokenUsed]
+ *   once a caller has finished checking scope and permission
  * @property user The token's owner, who the caller is treated as
  * @property scoped Whether the token was created restricted to particular
  *   projects at all. False means it reaches every project the owner can,
@@ -292,6 +314,7 @@ class PersonalAccessTokenService(services: InjectedServices) : BaseService(), In
  *   named has been deleted, in which case the token reaches nothing.
  */
 data class VerifiedToken(
+    val tokenId: UUID,
     val user: User,
     val scoped: Boolean,
     val scopedProjectIds: Set<UUID>

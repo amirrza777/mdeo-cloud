@@ -451,37 +451,61 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
      * @param projectId The UUID of the project
      * @param path The path to delete
      * @param recursive Whether to recursively delete directory contents
+     * @param expectedVersion When set, the delete is rejected unless the file's current version
+     *   matches exactly - the same compare-and-set [writeFile] offers, for a caller (a git push
+     *   replacing the project's tree) that read the file's version earlier and needs to know
+     *   nothing else changed it before removing it. Not checked when the path is a directory,
+     *   which carries no meaningful version, or when null.
      * @return ApiResult indicating success or containing an error
      */
-    fun delete(projectId: UUID, path: String, recursive: Boolean): ApiResult<Unit> {
+    fun delete(projectId: UUID, path: String, recursive: Boolean, expectedVersion: Int? = null): ApiResult<Unit> {
         val normalizedPath = normalizePath(path)
-        
+
         return transaction {
             checkProjectLock(projectId)?.let { return@transaction it }
-            
+            checkNotReserved(normalizedPath)?.let { return@transaction it }
+
             val row = FilesTable.selectAll()
                 .where { (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.path eq normalizedPath) }
                 .firstOrNull()
-            
+
             if (row == null) {
                 return@transaction fileSystemFailure(ErrorCodes.FILE_NOT_FOUND, "File or directory not found: $path")
             }
-            
+
             if (row[FilesTable.fileType] == FileType.DIRECTORY) {
                 val childrenCount = FilesTable.selectAll()
                     .where { (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.parentPath eq normalizedPath) }
                     .count()
-                
+
                 if (childrenCount > 0 && !recursive) {
                     return@transaction fileSystemFailure(ErrorCodes.DIRECTORY_NOT_EMPTY, "Directory not empty: $path")
                 }
-                
+
+                FilesTable.deleteWhere {
+                    (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.path eq normalizedPath)
+                }
+            } else if (expectedVersion != null) {
+                // Same reasoning as writeFile's compare-and-set: folding the version into the
+                // DELETE's own WHERE clause is what makes the check atomic against a writer
+                // that commits between an earlier SELECT of this version and this statement.
+                val deletedRows = FilesTable.deleteWhere {
+                    (FilesTable.projectId eq projectId.toKotlinUuid()) and
+                    (FilesTable.path eq normalizedPath) and
+                    (FilesTable.version eq expectedVersion)
+                }
+                if (deletedRows == 0) {
+                    return@transaction fileSystemFailure(
+                        ErrorCodes.VERSION_CONFLICT,
+                        "File $path was modified concurrently, please retry"
+                    )
+                }
+            } else {
+                FilesTable.deleteWhere {
+                    (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.path eq normalizedPath)
+                }
             }
-            
-            FilesTable.deleteWhere { 
-                (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.path eq normalizedPath) 
-            }
-            
+
             success(Unit)
         }
     }
@@ -503,6 +527,7 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
         
         return transaction {
             checkProjectLock(projectId)?.let { return@transaction it }
+            checkNotReserved(normalizedFrom)?.let { return@transaction it }
             checkNotReserved(normalizedTo)?.let { return@transaction it }
 
             val sourceRow = FilesTable.selectAll()

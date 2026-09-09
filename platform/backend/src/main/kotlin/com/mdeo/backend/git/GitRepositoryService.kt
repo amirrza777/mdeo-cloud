@@ -278,6 +278,11 @@ class GitRepositoryService(
      * @param commitId The commit whose contents should become the project
      * @param callerIsProjectAdmin Whether the pushing user has admin permission
      *   on this project
+     * @param onFilesSnapshotted Test seam only: called once this push's per-file version
+     *   snapshot has been read, before anything is written against it. Lets a test commit a
+     *   concurrent edit in exactly that window - the one a real race depends on landing at the
+     *   right moment - so it can be exercised deterministically instead of by timing. A no-op in
+     *   production.
      * @return null on success, or a message describing why the push cannot be
      *   applied
      */
@@ -285,7 +290,8 @@ class GitRepositoryService(
         repository: PostgresDfsRepository,
         projectId: UUID,
         commitId: ObjectId,
-        callerIsProjectAdmin: Boolean
+        callerIsProjectAdmin: Boolean,
+        onFilesSnapshotted: () -> Unit = {}
     ): String? {
         // Nothing else reclaims storage a *rejected* push already wrote to
         // Postgres (JGit unpacks and commits it before this hook even runs),
@@ -378,6 +384,7 @@ class GitRepositoryService(
                 // applying one O(files squared), and nothing bounds a
                 // project's file count (the pack limit bounds bytes).
                 val existing = readProjectFiles(projectId).associateBy { it.path }
+                onFilesSnapshotted()
 
                 if (existing.mapValues { it.value.version } != repository.publishedFileVersions) {
                     throw GitPushRejected(
@@ -397,14 +404,29 @@ class GitRepositoryService(
                         // large project should not invalidate the rest of it.
                         continue
                     }
-                    val result = fileService.writeFile(projectId, path, content, create = true, overwrite = true)
+                    // Guarded by the version this same transaction just read for path, not only
+                    // by the whole-push snapshot check above: that check runs once, before this
+                    // loop, so a workbench edit committing in the gap between it and this
+                    // particular write would otherwise land here with no expectedVersion at all
+                    // and be silently overwritten. Passing it folds the check into this write's
+                    // own UPDATE, so a collision in that gap is caught here instead.
+                    val result = fileService.writeFile(
+                        projectId, path, content, create = true, overwrite = true,
+                        expectedVersion = existing[path]?.version
+                    )
                     if (result is ApiResult.Failure) {
                         throw GitPushRejected("could not write $path: ${result.error.message}")
                     }
                 }
 
                 for (path in existing.keys - pushed.keys) {
-                    val result = fileService.delete(projectId, path, recursive = false)
+                    // Same reasoning as the write loop above: existing[path] is always present
+                    // here (path is drawn from existing.keys), so this guards a delete against a
+                    // concurrent edit to the very file the push is about to remove.
+                    val result = fileService.delete(
+                        projectId, path, recursive = false,
+                        expectedVersion = existing[path]?.version
+                    )
                     if (result is ApiResult.Failure) {
                         throw GitPushRejected("could not delete $path: ${result.error.message}")
                     }

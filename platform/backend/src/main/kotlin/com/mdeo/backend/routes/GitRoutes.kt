@@ -397,8 +397,14 @@ private suspend fun ApplicationCall.authorizeGit(
     }
     // Cleared on success, so the two authenticated requests smart HTTP makes
     // per clone, fetch or push never accumulate against a user who is
-    // getting their credentials right.
-    authRateLimiter.recordSuccess(username, clientAddress)
+    // getting their credentials right. Keyed on the account that actually
+    // authenticated (user.username), not the Basic-auth username field the
+    // caller sent: with a token, that field is unchecked (verifiedToken
+    // resolves an identity from the password alone), so clearing whatever
+    // string the caller put there would let anyone holding a valid token of
+    // their own reset another username's failure count on demand simply by
+    // naming it here.
+    authRateLimiter.recordSuccess(user.username, clientAddress)
 
     // A token scoped to other projects is treated exactly like a caller
     // with no access to this one: the same answer as an unknown project,
@@ -419,5 +425,12 @@ private suspend fun ApplicationCall.authorizeGit(
     }
 
     val isProjectAdmin = projectService.hasProjectPermission(projectId, userId, isGlobalAdmin, ProjectPermission.ADMIN)
+    // Recorded only now, once scope and permission have both cleared: mirrors
+    // SshKeyService.recordKeyUsed, so a token's "last used" timestamp (shown
+    // to its owner to help spot a leaked one) reflects a request it was
+    // actually allowed to make, not merely one whose hash matched.
+    if (verifiedToken != null) {
+        personalAccessTokenService.recordTokenUsed(verifiedToken.tokenId)
+    }
     return GitAuthorization(projectId, isProjectAdmin)
 }

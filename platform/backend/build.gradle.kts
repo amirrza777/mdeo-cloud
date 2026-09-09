@@ -62,6 +62,11 @@ dependencies {
     // Testing
     testImplementation(libs.ktor.server.test.host)
     testImplementation(libs.kotlin.test.junit5)
+    // Real Postgres for the one place this codebase's tests need actual database semantics
+    // (transaction isolation, compare-and-set races) rather than pure, dependency-free logic.
+    testImplementation(libs.testcontainers)
+    testImplementation(libs.testcontainers.postgresql)
+    testImplementation(libs.testcontainers.junit.jupiter)
 }
 
 tasks.shadowJar {
