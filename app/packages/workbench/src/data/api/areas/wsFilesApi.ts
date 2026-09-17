@@ -79,12 +79,24 @@ export class WsFilesApi {
     }
 
     /**
-     * Drops everything cached for a project that changed elsewhere.
+     * Invalidates everything cached for a project that changed elsewhere.
      *
      * The notification is deliberately coarse - it says only that something
-     * changed - so the whole cache goes rather than any attempt to work out
-     * which entries are still good. Listeners are told which file paths were
-     * dropped so they can reload what they have open.
+     * changed - so every entry is treated as suspect rather than any attempt
+     * to work out which ones are still good. Listeners are told which file
+     * paths were invalidated so they can reload what they have open.
+     *
+     * A file entry keeps its cached version rather than being dropped
+     * outright: only the content is cleared, which is what forces the next
+     * read to go to the server instead of serving what might now be stale,
+     * while still leaving a version behind for the next write's
+     * expectedVersion to be conditioned on. Clearing both would make that
+     * write unconditional instead, silently overwriting whatever the change
+     * that triggered this notification actually did - reintroducing the
+     * exact race expectedVersion exists to catch, immediately after this
+     * client was told something had changed. A directory listing has no
+     * version to preserve this way and is dropped outright, since the
+     * pushed change may itself have added or removed entries from it.
      *
      * @param projectId The project whose files changed
      */
@@ -93,10 +105,15 @@ export class WsFilesApi {
             return;
         }
 
-        const paths = [...this.fileTreeCache.entries()]
-            .filter(([, info]) => info.type === FileType.File)
-            .map(([path]) => path);
-        this.fileTreeCache.clear();
+        const paths: string[] = [];
+        for (const [path, info] of [...this.fileTreeCache.entries()]) {
+            if (info.type === FileType.File) {
+                paths.push(path);
+                this.fileTreeCache.set(path, { ...info, content: undefined });
+            } else {
+                this.fileTreeCache.delete(path);
+            }
+        }
 
         for (const callback of this.invalidationCallbacks) {
             callback(projectId, paths);
@@ -519,11 +536,23 @@ export class WsFilesApi {
             this.fileTreeCache.set(normalizedPath, { exists: false });
         }
 
-        // A version conflict says this client's idea of the file is stale, so
-        // whatever is cached for it has to go: keeping it would send the same
-        // rejected version again on the next attempt.
+        // A version conflict says this client's idea of the file's content is
+        // stale, but the version just rejected is still worth keeping,
+        // precisely because it was rejected: dropping the whole entry would
+        // make the next write's expectedVersion undefined, turning a retry
+        // into the same unconditional overwrite this check exists to
+        // prevent - a user who sees "modified concurrently" and immediately
+        // saves again would silently clobber whatever change caused the
+        // conflict in the first place. Clearing only the content forces the
+        // next read to fetch the file's real current state from the server,
+        // and leaving the stale version in place until then means a write
+        // attempted before that read still fails safely, with a fresh
+        // conflict, rather than succeeding on stale grounds.
         if (this.cachedProjectId === projectId && code === FileSystemErrorCode.VersionConflict) {
-            this.fileTreeCache.delete(normalizedPath);
+            const existing = this.fileTreeCache.get(normalizedPath);
+            if (existing !== undefined) {
+                this.fileTreeCache.set(normalizedPath, { ...existing, content: undefined });
+            }
         }
 
         return { success: false, error: { code: code as any, message } };

@@ -378,7 +378,10 @@ private suspend fun ApplicationCall.authorizeGit(
     // proxied user would share one bucket, and normal git traffic from a
     // handful of people would exhaust it between them.
     val clientAddress = clientAddress(trustedProxyHops)
-    if (!authRateLimiter.isAllowed(username, clientAddress)) {
+    // Reserved before verification runs, not checked-then-reported after: see
+    // AuthRateLimiter.tryReserve's doc comment for why the two cannot be split apart without
+    // letting concurrent requests bypass the limit.
+    if (!authRateLimiter.tryReserve(username, clientAddress)) {
         respond(HttpStatusCode.TooManyRequests, "Too many attempts, try again later")
         return null
     }
@@ -390,21 +393,23 @@ private suspend fun ApplicationCall.authorizeGit(
     val verifiedToken = personalAccessTokenService.verifyToken(password)
     val user = verifiedToken?.user ?: userService.verifyPassword(username, password)
     if (user == null) {
-        authRateLimiter.recordFailure(username, clientAddress)
+        // No separate "record failure" call: the reservation above already counts this
+        // attempt as one.
         response.header(HttpHeaders.WWWAuthenticate, "Basic realm=\"MDEO Cloud\"")
         respond(HttpStatusCode.Unauthorized, "Invalid credentials")
         return null
     }
-    // Cleared on success, so the two authenticated requests smart HTTP makes
-    // per clone, fetch or push never accumulate against a user who is
-    // getting their credentials right. Keyed on the account that actually
-    // authenticated (user.username), not the Basic-auth username field the
-    // caller sent: with a token, that field is unchecked (verifiedToken
-    // resolves an identity from the password alone), so clearing whatever
-    // string the caller put there would let anyone holding a valid token of
-    // their own reset another username's failure count on demand simply by
-    // naming it here.
-    authRateLimiter.recordSuccess(user.username, clientAddress)
+    // Released against the same username field tryReserve reserved against, not the
+    // authenticated user.username a token resolves to: recordSuccess only ever undoes this one
+    // reservation, not anyone else's accumulated failures (see its own doc comment), so releasing
+    // the field that was actually reserved is what makes the accounting balance regardless of
+    // whether that field happens to match who really authenticated. Releasing user.username
+    // instead would leave this reservation against `username` stuck unreleased while incorrectly
+    // decrementing whatever the authenticated account's own window already held - which a caller
+    // presenting a valid token of their own alongside an arbitrary username field could otherwise
+    // use to run up a chosen victim's failure count for free, since every such request would
+    // reserve against that victim and never release it.
+    authRateLimiter.recordSuccess(username, clientAddress)
 
     // A token scoped to other projects is treated exactly like a caller
     // with no access to this one: the same answer as an unknown project,

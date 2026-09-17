@@ -363,14 +363,6 @@ class GitRepositoryService(
                 ?: return "could not read $projectFilePath: not a JSON object with a plugins array of urls"
             contents.plugins
         }
-        // Null when the push asks for no plugin change at all: either it did
-        // not carry the file, or carried one describing exactly what the
-        // project already has.
-        val changedPlugins = pushedPlugins
-            ?.takeIf { it != pluginService.getProjectPluginUrls(projectId).sorted() }
-        if (changedPlugins != null && !callerIsProjectAdmin) {
-            return "changing a project's plugins ($projectFilePath) requires project admin permission"
-        }
 
         // A single outer transaction, so a failure partway through (one path
         // rejected, an unreadable plugins file) rolls every write and delete
@@ -392,8 +384,48 @@ class GitRepositoryService(
                     )
                 }
 
+                // Read inside this transaction, not before it: a plugin change made from the
+                // workbench while this push was still being unpacked would otherwise be compared
+                // against here using a value read before the transaction even started, and an
+                // admin push that never touched the project file itself could go on to overwrite
+                // that intervening change once setProjectPlugins runs below. Reading it here,
+                // alongside the file-version snapshot above, is what makes both checks see the
+                // same, single consistent moment.
+                //
+                // Null when the push asks for no plugin change at all: either it did not carry
+                // the file, or carried one describing exactly what the project already has.
+                val changedPlugins = pushedPlugins
+                    ?.takeIf { it != pluginService.getProjectPluginUrls(projectId).sorted() }
+                if (changedPlugins != null && !callerIsProjectAdmin) {
+                    throw GitPushRejected(
+                        "changing a project's plugins ($projectFilePath) requires project admin permission"
+                    )
+                }
+
+                // Deletes run before writes, not the other order: a push that replaces a file
+                // with a directory at the same path (foo the file becomes foo/ containing foo/bar)
+                // has "foo" in existing.keys - pushed.keys and "foo/bar" in pushed. Writing
+                // "foo/bar" first would try to create it under a parent that, at that point, is
+                // still the old file row at "foo" - FileService now refuses that outright rather
+                // than silently nesting a child under a non-directory - and only the delete of
+                // "foo" below actually clears the way. Running deletes first means the write loop
+                // never has to contend with a parent path the push's own tree is about to replace.
+                for (path in existing.keys - pushed.keys) {
+                    // existing[path] is always present here (path is drawn from existing.keys),
+                    // so this guards a delete against a concurrent edit to the very file the push
+                    // is about to remove.
+                    val result = fileService.delete(
+                        projectId, path, recursive = false,
+                        expectedVersion = existing[path]?.version
+                    )
+                    if (result is ApiResult.Failure) {
+                        throw GitPushRejected("could not delete $path: ${result.error.message}")
+                    }
+                }
+
                 for ((path, content) in pushed) {
-                    val unchanged = existing[path]?.content?.contentEquals(content) == true
+                    val previous = existing[path]
+                    val unchanged = previous?.content?.contentEquals(content) == true
                     if (unchanged) {
                         // Writing back exactly what is already stored would
                         // still bump the file's version and invalidate every
@@ -410,25 +442,19 @@ class GitRepositoryService(
                     // particular write would otherwise land here with no expectedVersion at all
                     // and be silently overwritten. Passing it folds the check into this write's
                     // own UPDATE, so a collision in that gap is caught here instead.
+                    //
+                    // overwrite is conditioned on whether this path was already in the snapshot,
+                    // not hardcoded true: for a path pushed's tree introduces fresh (previous ==
+                    // null), overwrite = false means a file a concurrent workbench edit created at
+                    // this exact path, after the snapshot was taken, causes this write to fail
+                    // with FILE_EXISTS instead of silently clobbering it - expectedVersion alone
+                    // cannot catch this case, since there was no version to expect yet.
                     val result = fileService.writeFile(
-                        projectId, path, content, create = true, overwrite = true,
-                        expectedVersion = existing[path]?.version
+                        projectId, path, content, create = true, overwrite = previous != null,
+                        expectedVersion = previous?.version
                     )
                     if (result is ApiResult.Failure) {
                         throw GitPushRejected("could not write $path: ${result.error.message}")
-                    }
-                }
-
-                for (path in existing.keys - pushed.keys) {
-                    // Same reasoning as the write loop above: existing[path] is always present
-                    // here (path is drawn from existing.keys), so this guards a delete against a
-                    // concurrent edit to the very file the push is about to remove.
-                    val result = fileService.delete(
-                        projectId, path, recursive = false,
-                        expectedVersion = existing[path]?.version
-                    )
-                    if (result is ApiResult.Failure) {
-                        throw GitPushRejected("could not delete $path: ${result.error.message}")
                     }
                 }
 
@@ -575,7 +601,14 @@ class GitRepositoryService(
                 }
                 .mapNotNull { row ->
                     val path = row[FilesTable.path].trimStart('/')
-                    if (path.isEmpty() || path.endsWith(RESERVED_FILE_EXTENSION, ignoreCase = true)) {
+                    // Every segment is checked, not just the path's own suffix, matching
+                    // FileService.checkNotReserved: a stray "project.mdeo/child.txt" row left
+                    // over from before this reservation existed does not itself end in
+                    // RESERVED_FILE_EXTENSION, but "project.mdeo" - the segment naming its
+                    // directory - does, and it would otherwise collide with the generated
+                    // projectFilePath entry in the same tree exactly as a bare stray file would.
+                    val reserved = path.split('/').any { it.endsWith(RESERVED_FILE_EXTENSION, ignoreCase = true) }
+                    if (path.isEmpty() || reserved) {
                         return@mapNotNull null
                     }
                     val encoded = row[FilesTable.content] ?: ""

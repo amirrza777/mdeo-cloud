@@ -243,6 +243,11 @@ fun Route.oauthRoutes(
         )
 
         logger.info("Issued git OAuth access token '{}' for user {}", token.name, redemption.userId)
+        // RFC 6749 §5.1 requires both headers on a token response: the body carries a live
+        // credential, and without them an intermediate cache (or the browser's own) is otherwise
+        // free to store and replay it for a later request that never asked for one.
+        call.response.header(HttpHeaders.CacheControl, "no-store")
+        call.response.header(HttpHeaders.Pragma, "no-cache")
         call.respondText(
             """{"access_token":"${token.token}","token_type":"Bearer","scope":"git"}""",
             ContentType.Application.Json
@@ -306,6 +311,15 @@ private fun validate(body: GitOAuthAuthorizationRequest, expectedClientId: Strin
 private fun isLoopbackRedirect(uri: String): Boolean {
     val parsed = runCatching { URI(uri) }.getOrNull() ?: return false
     if (!parsed.scheme.equals("http", ignoreCase = true)) {
+        return false
+    }
+    if (parsed.fragment != null) {
+        // appendQuery below appends "?code=...&state=..." by string concatenation, which lands
+        // after a fragment rather than before it if the redirect URI already has one - so the
+        // credential helper's own HTTP server, which only ever sees the path and query of the
+        // request the browser makes, would never receive the code or state at all. Not something
+        // a native client legitimately needs, since RFC 8252 does not call for one, so refusing it
+        // outright is simpler than trying to append correctly around it.
         return false
     }
     return parsed.host in setOf("127.0.0.1", "::1", "[::1]", "localhost")

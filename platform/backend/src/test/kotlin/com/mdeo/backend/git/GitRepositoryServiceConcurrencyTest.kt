@@ -169,6 +169,50 @@ class GitRepositoryServiceConcurrencyTest {
         )
     }
 
+    @Test
+    fun `a workbench create landing during a push's own write loop for a new file is not silently overwritten`() {
+        val path = "new.txt"
+
+        // Published with no files at all, so `path` is genuinely new to both the project and
+        // this push - existing[path] is null, which is exactly the case the per-file version
+        // guard could not cover before overwrite was conditioned on previous != null.
+        val repository = gitRepositoryService.openRepository(projectId)
+        val baseCommit = repository.resolve(gitRepositoryService.branch)
+        assertNotNull(baseCommit, "test setup: opening the repository should publish a base commit")
+
+        val pushedCommit = commitWithFile(repository, baseCommit, path, "pushed-content")
+
+        var concurrentCreateApplied = false
+        val failure = gitRepositoryService.applyCommitToProject(
+            repository, projectId, pushedCommit, callerIsProjectAdmin = true,
+            onFilesSnapshotted = {
+                // A workbench user creates the very path this push is about to introduce, in the
+                // gap between the push's snapshot (which saw no file at all here) and its own
+                // write for that path. Same separate-thread reasoning as the edit-path test above.
+                val thread = Thread {
+                    val result = fileService.writeFile(
+                        projectId, path, "concurrent-workbench-create".toByteArray(),
+                        create = true, overwrite = false
+                    )
+                    concurrentCreateApplied = result is ApiResult.Success
+                }
+                thread.start()
+                thread.join()
+            }
+        )
+
+        assertTrue(concurrentCreateApplied, "test setup: the concurrent create itself should have succeeded")
+        assertNotNull(failure, "the push should have been rejected, not silently applied over the concurrent create")
+
+        val finalContent = fileService.readFile(projectId, path)
+        assertTrue(finalContent is ApiResult.Success)
+        assertEquals(
+            "concurrent-workbench-create",
+            String(finalContent.value),
+            "the concurrent create must win - the push must not have overwritten it"
+        )
+    }
+
     /**
      * Builds a commit as a real `git push` would produce one: a tree with [path] set to
      * [content], plus [RESERVED_PROJECT_FILE] describing the project's current (here, empty)

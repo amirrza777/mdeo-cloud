@@ -44,14 +44,18 @@ fun Route.authRoutes(
             // every proxied user would share one bucket and could lock each
             // other out with their own failed logins.
             val clientAddress = call.clientAddress(trustedProxyHops)
-            if (!authRateLimiter.isAllowed(request.username, clientAddress)) {
+            // Reserved before verification runs, not checked-then-reported after: see
+            // AuthRateLimiter.tryReserve's doc comment for why the two cannot be split apart
+            // without letting concurrent requests bypass the limit.
+            if (!authRateLimiter.tryReserve(request.username, clientAddress)) {
                 call.respond(HttpStatusCode.TooManyRequests, mapOf("error" to "Too many attempts, try again later"))
                 return@post
             }
 
             val user = userService.verifyPassword(request.username, request.password)
             if (user == null) {
-                authRateLimiter.recordFailure(request.username, clientAddress)
+                // No separate "record failure" call: the reservation above already counts this
+                // attempt as one.
                 call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Invalid credentials"))
                 return@post
             }

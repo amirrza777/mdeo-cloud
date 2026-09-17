@@ -223,8 +223,17 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
         return transaction {
             checkProjectLock(projectId)?.let { return@transaction it }
             checkNotReserved(normalizedPath)?.let { return@transaction it }
+            // FOR UPDATE, not a plain SELECT: without it, another transaction could change this
+            // row's version between this read and the version check below, then commit before
+            // this transaction's own UPDATE runs. The version check would have already passed
+            // against a value that was, by the time it mattered, stale - and nextVersion() would
+            // already have consumed a version number for a write that was about to be rejected as
+            // a conflict anyway. Locking the row for the rest of this transaction is what makes
+            // "read the version, decide, write" one atomic step instead of three separate ones a
+            // concurrent writer could land inside of.
             val existing = FilesTable.selectAll()
                 .where { (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.path eq normalizedPath) }
+                .forUpdate()
                 .firstOrNull()
 
             if (existing != null) {
@@ -242,14 +251,15 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
                     )
                 }
 
+                // Only reached once the version check above has passed under the row lock taken
+                // above, so nextVersion() here can never be "spent" on a write that turns out to
+                // lose a race - there is no longer a race left to lose by this point.
                 val contentText = Base64.getEncoder().encodeToString(content)
                 val newVersion = nextVersion(projectId, normalizedPath)
                 if (expectedVersion != null) {
-                    // The precondition check above is not by itself a compare-and-set: another
-                    // writer could commit between that SELECT and this UPDATE. Folding the same
-                    // condition into the UPDATE's own WHERE clause makes the database enforce it
-                    // atomically instead, so at most one of two racing writers with the same
-                    // expectedVersion can ever have its update actually apply.
+                    // Folded into the UPDATE's own WHERE clause too, as a second, independent
+                    // enforcement of the same invariant the row lock above already guarantees -
+                    // belt and braces, not load-bearing on its own.
                     val updatedRows = FilesTable.update({
                         (FilesTable.projectId eq projectId.toKotlinUuid()) and
                         (FilesTable.path eq normalizedPath) and
@@ -278,11 +288,11 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
                 if (!create) {
                     return@transaction fileSystemFailure(ErrorCodes.FILE_NOT_FOUND, "File not found: $path")
                 }
-                
-                ensureParentDirectories(projectId, normalizedPath, now)
-                
+
+                ensureParentDirectories(projectId, normalizedPath, now)?.let { return@transaction it }
+
                 val parentPath = getParentPath(normalizedPath)
-                
+
                 val contentText = Base64.getEncoder().encodeToString(content)
                 FilesTable.insert {
                     it[FilesTable.projectId] = projectId.toKotlinUuid()
@@ -327,10 +337,10 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
                 return@transaction fileSystemFailure(ErrorCodes.FILE_EXISTS, "File already exists: $path")
             }
 
-            ensureParentDirectories(projectId, normalizedPath, now)
-            
+            ensureParentDirectories(projectId, normalizedPath, now)?.let { return@transaction it }
+
             val parentPath = getParentPath(normalizedPath)
-            
+
             FilesTable.insert {
                 it[FilesTable.projectId] = projectId.toKotlinUuid()
                 it[FilesTable.path] = normalizedPath
@@ -552,8 +562,8 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
                 }
             }
             
-            ensureParentDirectories(projectId, normalizedTo, now)
-            
+            ensureParentDirectories(projectId, normalizedTo, now)?.let { return@transaction it }
+
             val oldParent = getParentPath(normalizedFrom)
             val newParent = getParentPath(normalizedTo)
             
@@ -604,19 +614,21 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
      * @param projectId The UUID of the project
      * @param path The path whose parent directories should be created
      * @param now The timestamp to use for creation
+     * @return An ApiResult failure if an existing row on the parent chain is a file rather than a
+     *   directory, null otherwise
      */
-    private fun ensureParentDirectories(projectId: UUID, path: String, now: Instant) {
-        val parentPath = getParentPath(path) ?: return
-        
+    private fun ensureParentDirectories(projectId: UUID, path: String, now: Instant): ApiResult<Nothing>? {
+        val parentPath = getParentPath(path) ?: return null
+
         val parent = FilesTable.selectAll()
             .where { (FilesTable.projectId eq projectId.toKotlinUuid()) and (FilesTable.path eq parentPath) }
             .firstOrNull()
-        
+
         if (parent == null) {
-            ensureParentDirectories(projectId, parentPath, now)
-            
+            ensureParentDirectories(projectId, parentPath, now)?.let { return it }
+
             val grandparentPath = getParentPath(parentPath)
-            
+
             FilesTable.insert {
                 it[FilesTable.projectId] = projectId.toKotlinUuid()
                 it[FilesTable.path] = parentPath
@@ -626,7 +638,21 @@ class FileService(services: InjectedServices) : BaseService(), InjectedServices 
                 it[createdAt] = now
                 it[updatedAt] = now
             }
+        } else if (parent[FilesTable.fileType] != FileType.DIRECTORY) {
+            // A row already exists at this exact path, but it is a file, not a directory: without
+            // this check, the caller below would go on to insert a child row underneath it
+            // (parentPath pointing at a path that names a file), which git happily writes and
+            // reads back, but which the workbench's own directory listing can never reach, since
+            // readdir only ever looks for children of an actual directory row. This is exactly
+            // what a push that replaces a file with a directory at the same path does if writes
+            // and deletes are not carefully ordered around it; see GitRepositoryService's
+            // applyCommitToProject for the other half of that fix.
+            return fileSystemFailure(
+                ErrorCodes.FILE_NOT_A_DIRECTORY,
+                "Not a directory: $parentPath"
+            )
         }
+        return null
     }
     
     /**
