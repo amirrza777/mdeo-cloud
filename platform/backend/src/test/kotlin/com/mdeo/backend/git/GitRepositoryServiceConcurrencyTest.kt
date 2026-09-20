@@ -57,7 +57,7 @@ import kotlin.uuid.toKotlinUuid
  * (`PostgreSQLContainer<Nothing>` is as close as the type system gets and does not compile calls
  * that return `SELF`), so a trivially self-typed subclass is the standard way to use it from Kotlin.
  */
-private class KPostgreSQLContainer(image: DockerImageName) : PostgreSQLContainer<KPostgreSQLContainer>(image)
+internal class KPostgreSQLContainer(image: DockerImageName) : PostgreSQLContainer<KPostgreSQLContainer>(image)
 
 /**
  * Regression test for the race [GitRepositoryService.applyCommitToProject]'s per-file
@@ -258,12 +258,12 @@ class GitRepositoryServiceConcurrencyTest {
 }
 
 /**
- * The minimal [InjectedServices] this test needs: [FileService] and [PluginService] wired to a
+ * The minimal [InjectedServices] the git tests need: [FileService] and [PluginService] wired to a
  * real database, with every other service left to fail loudly if the code under test ever turns
- * out to depend on one - a signal the test has grown a dependency it does not declare, rather
+ * out to depend on one - a signal a test has grown a dependency it does not declare, rather
  * than a silent no-op.
  */
-private class TestServices : InjectedServices {
+internal class TestServices : InjectedServices {
     // Built by hand rather than via AppConfig.load(): that reads real environment variables,
     // several of which (e.g. PLUGIN_BASE_URL) it assigns into non-nullable fields with no
     // fallback, which is fine for the application's actual deployments (which always set them)

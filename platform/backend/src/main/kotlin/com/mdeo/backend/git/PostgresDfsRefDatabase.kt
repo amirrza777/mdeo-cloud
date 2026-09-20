@@ -68,7 +68,18 @@ class PostgresDfsRefDatabase(
                 if (symTarget != null) {
                     val target = resolved[symTarget]
                         ?: ObjectIdRef.Unpeeled(Ref.Storage.NEW, symTarget, null)
-                    symbolic.add(SymbolicRef(name, target))
+                    val ref = SymbolicRef(name, target)
+                    symbolic.add(ref)
+                    // A symbolic ref belongs in *both* lists, which is what
+                    // JGit's own in-memory implementation does: `sym` is the
+                    // subset of `ids` that happens to be symbolic, not a
+                    // second collection beside it. Listing HEAD only in `sym`
+                    // leaves RefDatabase.getRefs building a RefMap whose
+                    // loose entry has no counterpart to resolve against, and
+                    // it throws IllegalStateException - turning every git
+                    // request for the project into a 500 the moment any
+                    // symbolic ref exists at all.
+                    ids.add(ref)
                 }
             }
 

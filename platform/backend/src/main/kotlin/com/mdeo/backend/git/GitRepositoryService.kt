@@ -30,6 +30,7 @@ import java.time.Instant
 import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import kotlin.uuid.toKotlinUuid
 
 /**
@@ -145,19 +146,30 @@ class GitRepositoryService(
         projectLocks.computeIfAbsent(projectId) { Mutex() }.withLock { block() }
 
     /**
-     * Opens a project's repository, creating it if this is the first access.
+     * Opens a project's repository, establishing HEAD if it does not have one yet.
      *
      * @param projectId The project to open
-     * @return The repository, with its files published on [branch]
+     * @return The repository, with HEAD pointing at [branch] and its files published there
      */
     fun openRepository(projectId: UUID): PostgresDfsRepository {
         val repository = PostgresDfsRepository(projectId)
-        if (!repository.objectDatabase.exists()) {
-            repository.create(true)
-            // JGit's create() links HEAD to refs/heads/master, but this
-            // service only ever publishes on [branch]. Left alone, HEAD
-            // would point at a ref that never exists, so a clone sees an
-            // unborn remote HEAD and may not check anything out.
+        // Keyed on HEAD itself rather than on whether the object database
+        // exists: `ObjectDatabase.exists()` is a hardcoded `return true` that
+        // no DFS subclass overrides, so a guard on it never fires and the
+        // link below never ran. HEAD is what actually has to be established
+        // here, so asking after HEAD is both the honest condition and one
+        // that repairs a repository created before this was fixed.
+        //
+        // There is nothing to create(): a DFS repository has no on-disk
+        // layout to lay down, and create() would in fact throw "Repository
+        // already exists" for the same reason the old guard never fired.
+        //
+        // Without the link, this service publishes only on [branch] while
+        // HEAD stays unborn, and an unborn remote HEAD is not a cosmetic
+        // detail: a clone that has to choose one branch for itself
+        // (`--single-branch`, which `--depth` implies) finds no branch to
+        // choose and silently produces an empty repository.
+        if (repository.exactRef(Constants.HEAD) == null) {
             val headUpdate = repository.updateRef(Constants.HEAD)
             headUpdate.disableRefLog()
             headUpdate.link(branch)
@@ -684,6 +696,18 @@ class GitRepositoryService(
      * the packs holding them through this database's own [PostgresDfsObjDatabase.commitPackImpl],
      * the same method an ordinary push's packs are committed through.
      *
+     * The garbage TTL is what makes that pruning actually happen. Left at its
+     * default the collector still identifies the unreachable objects, but only
+     * moves them into an `UNREACHABLE_GARBAGE` pack and keeps it, so storage
+     * grew by roughly one rejected pack per attempt and never shrank - the
+     * abuse this function exists to close stayed wide open, and a project
+     * driven past [maxProjectStorageBytes] that way stayed over the limit
+     * permanently, refusing every later push. An expiry of one millisecond
+     * means "garbage found by this run is garbage now": safe here because
+     * withProjectLock holds the project for the whole of the push that just
+     * failed, so there is no concurrent push whose freshly written, not yet
+     * referenced objects could be swept out from under it.
+     *
      * Deliberately not run after every push, accepted or not: a push that
      * succeeds needs nothing pruned (every pack it added is reachable from
      * the ref it just moved), and running a full reachability walk on that
@@ -703,7 +727,9 @@ class GitRepositoryService(
      */
     fun reclaimRejectedPushGarbage(repository: PostgresDfsRepository, projectId: UUID) {
         try {
-            DfsGarbageCollector(repository).pack(NullProgressMonitor.INSTANCE)
+            DfsGarbageCollector(repository)
+                .setGarbageTtl(1, TimeUnit.MILLISECONDS)
+                .pack(NullProgressMonitor.INSTANCE)
         } catch (e: Exception) {
             logger.warn("Could not reclaim git storage for project {} after a rejected push", projectId, e)
         }
